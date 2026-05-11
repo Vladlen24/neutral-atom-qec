@@ -1,1 +1,1 @@
-[![Demo video](./visualization.png)](./atom_config_v2.0.mp4)
+[![Demo video](./media/visualization.png)](./media/atom_config_v2.0.mp4)
