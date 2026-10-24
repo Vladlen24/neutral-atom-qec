@@ -43,3 +43,9 @@ python3 -m pip install -r requirements-experiments.txt
 
 The original notebook environments were not recorded. The requirements list
 the imported packages; it is not a lockfile for those historical environments.
+
+[`transpiler.py`](transpiler.py) lowers unitary circuit operations to global
+RY rotations, local RZ rotations, and local CZ gates for the zoned-architecture
+experiment. It removes barriers and measurements, rewrites CX as H-CZ-H,
+and optionally cancels compatible native rotations. Measurement semantics
+are outside this transpilation experiment.
