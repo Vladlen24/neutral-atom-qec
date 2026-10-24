@@ -63,3 +63,14 @@ and exports programs for [MQT NAViz](https://github.com/munich-quantum-toolkit/n
 The [zoned compiler documentation](https://mqt.readthedocs.io/projects/qmap/en/stable/na_zoned_compiler.html)
 describes the routing-aware and routing-agnostic methods and their references.
 See also [QMAP's citation guidance](https://github.com/munich-quantum-toolkit/qmap#cite-this).
+
+### MQT QMAP: HyRoNA
+
+[`hyrona.ipynb`](hyrona.ipynb) maps a source circuit using HyRoNA's hybrid
+gate-based and atom-shuttling strategies, schedules the result, and exports
+NAViz inputs. The source circuit is passed directly to the mapper; this
+experiment does not use the separate zoned native-basis transpiler.
+
+HyRoNA is part of [MQT QMAP](https://github.com/munich-quantum-toolkit/qmap).
+See the [hybrid mapper documentation](https://mqt.readthedocs.io/projects/qmap/en/stable/na_hybrid_mapper.html)
+and QMAP's references for the underlying routing method.
