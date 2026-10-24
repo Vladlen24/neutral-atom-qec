@@ -56,5 +56,5 @@ python3 -m unittest discover -s solver -p "test_*.py"
 | Branch | Scope |
 | --- | --- |
 | `main` | SMT compiler and its mathematical model |
-| [`manual_compilation`](https://github.com/Vladlen24/https---github.com-Vladlen24-neutral-atom-qec/tree/manual_compilation) | Hand-scheduled distance-3 surface-code logical state preparation |
-| [`external_compilers`](https://github.com/Vladlen24/https---github.com-Vladlen24-neutral-atom-qec/tree/external_compilers) | Experiments with MQT QMAP, HyRoNA, and OLSQ-DPQA |
+| [`manual_compilation`](https://github.com/Vladlen24/neutral-atom-qec/tree/manual_compilation) | Hand-scheduled distance-3 surface-code logical state preparation |
+| [`external_compilers`](https://github.com/Vladlen24/neutral-atom-qec/tree/external_compilers) | Experiments with MQT QMAP, HyRoNA, and OLSQ-DPQA |
