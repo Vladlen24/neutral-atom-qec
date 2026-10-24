@@ -55,5 +55,5 @@ DPQA routes CZ gates; inserted single-qubit layers preserve source order but
 do not optimize their calibrated timing or addressability. The example has
 Hadamards between CZ blocks, so global CZ commutation is not enabled.
 
-The [main branch](https://github.com/Vladlen24/https---github.com-Vladlen24-neutral-atom-qec)
+The [main branch](https://github.com/Vladlen24/neutral-atom-qec)
 contains the SMT compiler.
