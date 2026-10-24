@@ -1,100 +1,59 @@
-# Neutral-Atom Quantum Compilation Experiments
+# External compiler experiments
 
-## Manual compilation
+Experiments with existing neutral-atom compilation tools, using shared
+quantum error-correction circuit definitions.
 
-[`main.ipynb`](main.ipynb) is an interactive editor for hand-scheduled atom
-transport and gate highlights. It uses two families of diagonal AOD frequency
-lines. Choose a configuration, edit the iteration program, and inspect the
-resulting atom movements.
+| Notebook | Compilation method |
+| --- | --- |
+| [`mqt_compiler_zonedNAarch.ipynb`](mqt_compiler_zonedNAarch.ipynb) | MQT QMAP routing-aware compilation for zoned architectures |
+| [`hyrona.ipynb`](hyrona.ipynb) | HyRoNA hybrid gate-based and atom-shuttling routing |
+| [`DPQA_compiler.ipynb`](DPQA_compiler.ipynb) | OLSQ-DPQA CZ routing with a separate extended checkout |
 
-Open the notebook in a Jupyter environment with `IPython` installed and run
-the main code cell. Load
-[`settings/atom_grid_config_v2.0_fix.json`](settings/atom_grid_config_v2.0_fix.json)
-using the editor's JSON controls to inspect the corrected demonstration.
-
-[![Manual compilation demo](media/visualization.png)](media/atom_configuration_v2.0_fix.mp4)
-
-- [Corrected demonstration](media/atom_configuration_v2.0_fix.mp4)
-- [Earlier demonstration](media/atom_config_v2.0.mp4) and its
-  [configuration](settings/atom_grid_config_v2.0.json)
-
-The saved HTML output in the notebook is refreshed together with the corrected
-configuration and video; the editor's source code is unchanged in this update.
-
-Local research drafts, reference documents, generated files, and independent
-external checkouts are excluded from version control.
-
-## External compiler experiments
-
-These experiments explore existing compilation tools. Their shared input
-circuits are defined in [`circuit.py`](circuit.py): rotated-surface-code and
-Steane-code preparations, graph-state preparations, verified preparations,
-and a hand-scheduled 17-qubit surface-code circuit.
-
-Circuit synthesis uses [MQT QECC](https://github.com/munich-quantum-toolkit/qecc).
-See its [citation guidance](https://github.com/munich-quantum-toolkit/qecc#cite-this)
-for the corresponding state-preparation and verification methods.
-
-Install the experiment dependencies in a separate Python environment:
+## Setup
 
 ```sh
 python3 -m pip install -r requirements-experiments.txt
 ```
 
-The original notebook environments were not recorded. The requirements list
-the imported packages; it is not a lockfile for those historical environments.
+Open the notebooks from the repository root. Visualization files are exported
+to `visualisation_instructions/`; MP4 generation additionally requires `ffmpeg`.
 
-[`transpiler.py`](transpiler.py) lowers unitary circuit operations to global
-RY rotations, local RZ rotations, and local CZ gates for the zoned-architecture
-experiment. It removes barriers and measurements, rewrites CX as H-CZ-H,
-and optionally cancels compatible native rotations. Measurement semantics
-are outside this transpilation experiment.
+## Source circuits and native gates
 
-### MQT QMAP: zoned architectures
+[`circuit.py`](circuit.py) defines rotated-surface-code and Steane-code
+preparations, graph-state preparations, verified preparations, and a
+hand-scheduled 17-qubit surface-code circuit. Circuit synthesis uses
+[MQT QECC](https://github.com/munich-quantum-toolkit/qecc); its
+[citation guidance](https://github.com/munich-quantum-toolkit/qecc#cite-this)
+lists the corresponding synthesis methods.
 
-[`mqt_compiler_zonedNAarch.ipynb`](mqt_compiler_zonedNAarch.ipynb) selects a
-shared source circuit, lowers it to the native gate set, defines storage and
-entanglement zones, and runs the routing-aware compiler. It exports `.naviz`
-and `.namachine` files into the ignored `visualisation_instructions/` folder.
-Open the notebook from the repository root with its dependencies installed.
+[`transpiler.py`](transpiler.py) lowers unitary operations to global RY, local
+RZ, and CZ gates for the zoned compiler. It removes barriers and measurements,
+decomposes CX into H-CZ-H, and optionally simplifies native rotations.
+HyRoNA receives the source circuit directly.
 
-This experiment uses [MQT QMAP](https://github.com/munich-quantum-toolkit/qmap)
-and exports programs for [MQT NAViz](https://github.com/munich-quantum-toolkit/naviz).
-The [zoned compiler documentation](https://mqt.readthedocs.io/projects/qmap/en/stable/na_zoned_compiler.html)
-describes the routing-aware and routing-agnostic methods and their references.
-See also [QMAP's citation guidance](https://github.com/munich-quantum-toolkit/qmap#cite-this).
+## MQT QMAP and HyRoNA
 
-### MQT QMAP: HyRoNA
+Both experiments use [MQT QMAP](https://github.com/munich-quantum-toolkit/qmap)
+and export inputs for [MQT NAViz](https://github.com/munich-quantum-toolkit/naviz).
+The method descriptions and references are available in the
+[zoned compiler documentation](https://mqt.readthedocs.io/projects/qmap/en/stable/na_zoned_compiler.html),
+[HyRoNA documentation](https://mqt.readthedocs.io/projects/qmap/en/stable/na_hybrid.html),
+and [QMAP citation guidance](https://github.com/munich-quantum-toolkit/qmap#cite-this).
 
-[`hyrona.ipynb`](hyrona.ipynb) maps a source circuit using HyRoNA's hybrid
-gate-based and atom-shuttling strategies, schedules the result, and exports
-NAViz inputs. The source circuit is passed directly to the mapper; this
-experiment does not use the separate zoned native-basis transpiler.
+## OLSQ-DPQA dependency
 
-HyRoNA is part of [MQT QMAP](https://github.com/munich-quantum-toolkit/qmap).
-See the [hybrid mapper documentation](https://mqt.readthedocs.io/projects/qmap/en/stable/na_hybrid.html)
-and QMAP's references for the underlying routing method.
+The DPQA notebook requires a separate extended
+[OLSQ-DPQA](https://github.com/UCLA-VAST/DPQA) checkout at
+`dpqa_compiler/DPQA/`. The external source and extensions are not included here.
+The notebook expects upstream revision `600df66af4136ccdab88b49c28e1771ef2a8cbe9`
+with a `single_qubit.py` helper, command-line options for circuit-operation JSON
+and architecture settings, and single-qubit instruction/animation support.
+An unmodified upstream checkout does not provide this interface.
 
-### OLSQ-DPQA
+DPQA routes CZ gates; inserted single-qubit layers preserve source order but
+do not optimize their calibrated timing or addressability. The example has
+Hadamards between CZ blocks, so global CZ commutation is not enabled.
 
-[`DPQA_compiler.ipynb`](DPQA_compiler.ipynb) is an experiment with the external
-[OLSQ-DPQA compiler](https://github.com/UCLA-VAST/DPQA). It extracts CZ
-interactions from a Qiskit source circuit and invokes a separate local checkout
-at `dpqa_compiler/DPQA/`. That checkout is ignored by Git and is not distributed
-with this repository. The SMT compiler developed in `solver/` has its own
-implementation and does not import or invoke DPQA.
-
-The experiment used upstream revision
-`600df66af4136ccdab88b49c28e1771ef2a8cbe9` with additional local extensions:
-`single_qubit.py`, command-line options for circuit-operation JSON and explicit
-architecture settings, and instruction/animation handling for inserted
-single-qubit layers. Those extensions are not published here. An unmodified
-upstream checkout is insufficient to run this notebook; the notebook is a
-record of the locally extended experiment. Its original solver and animation
-environment remains separate from the Qiskit environment.
-
-DPQA routes CZ gates; the inserted single-qubit layers preserve source order
-but do not optimize calibrated hardware timing or addressability. The example
-includes Hadamards between CZ blocks, so global CZ commutation is not enabled.
-For the external compiler and the corresponding publications, consult the
-[upstream README](https://github.com/UCLA-VAST/DPQA#readme).
+The [main branch](https://github.com/Vladlen24/https---github.com-Vladlen24-neutral-atom-qec)
+contains the SMT compiler.

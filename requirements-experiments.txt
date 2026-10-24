@@ -1,4 +1,4 @@
-# Dependencies of the external compiler experiments, separate from solver/.
+# Dependencies for the external compiler experiments.
 numpy
 qiskit
 mqt.qecc

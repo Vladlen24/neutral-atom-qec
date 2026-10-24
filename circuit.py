@@ -2,7 +2,6 @@
 
 Code construction and state-preparation synthesis use MQT QECC:
 https://github.com/munich-quantum-toolkit/qecc
-These helpers are independent of the SMT transport compiler in solver/.
 """
 
 import numpy as np
