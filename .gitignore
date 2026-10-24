@@ -23,3 +23,6 @@ __pycache__/
 .ipynb_checkpoints/
 .matplotlib/
 /solver/output/
+
+# Original notebook videos may contain local research annotations
+/solver/mapf_*.mp4

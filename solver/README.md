@@ -107,6 +107,9 @@ C_k^t\Rightarrow0\le\gamma_k^t<W.$$
 
 Initially all lines are disabled:
 
+In the successive-layer version this initialization applies only to the first
+layer; later layers inherit the active-state and coordinate conditions in C13.
+
 $$\forall j,k:\quad\neg R_j^0\land\neg C_k^0.$$
 
 ### C06. Speed of continuously active lines
@@ -124,8 +127,8 @@ model. A line can be activated at an otherwise unconstrained in-bounds position.
 
 Define whether any row or column changes its enabled state:
 
-$$S_t=\left(\bigvee_j R_j^t\ne R_j^{t+1}\right)
-\lor\left(\bigvee_k C_k^t\ne C_k^{t+1}\right).$$
+$$S_t=\left(\bigvee_j (R_j^t\ne R_j^{t+1})\right)
+\lor\left(\bigvee_k (C_k^t\ne C_k^{t+1})\right).$$
 
 When $S_t$ holds, every continuously active line keeps its coordinate:
 
@@ -309,26 +312,64 @@ python3 -m unittest discover -s solver -p "test_*.py"
 Small SAT/UNSAT cases check permitted and forbidden configurations independently
 of the default example. The test suite expands with the corresponding constraints.
 
+The final suite has 16 focused constraint tests and three full-schedule checks.
+It checks bounds, collisions, capture, switching, line ordering, speed limits,
+SLM/AOD support, exact pair cardinality, selection flexibility, spectator
+isolation, carried line state, schedule continuity, and complete CZ coverage.
+The integration checks use ordinary Python predicates on the solved schedule.
+
+All historical compiler examples were executed during reconstruction. The
+introductory maze solution has 33 cells, matching an independent breadth-first
+search. The 19 extracted constraint/helper function bodies were checked against
+the notebook's AST after English renaming and docstring translation; the local
+research notebook remained byte-for-byte unchanged.
+
+Checks used Python 3.13.7 and Z3 4.15.0; the 16 focused constraint tests also
+passed with Z3 5.3.1. MP4 rendering used Matplotlib 3.10.5 and ffmpeg. These are
+recorded validation environments, not timing or scaling benchmarks.
+
+## English scheduling demonstration
+
+[![Final Rydberg layer](media/scheduled_cz_layers.png)](media/scheduled_cz_layers.mp4)
+
+Green outlines mark fixed SLM sites, dashed red lines mark active AOD rows and
+columns, and the orange overlay marks a global Rydberg pulse. This recorded
+run schedules the four star-graph CZ interactions in four layers and 21 logical
+transitions. A different satisfying model can choose different trajectories,
+pair order, or later-layer horizons. The prototype does not globally optimize
+the entire sequence of layers.
+
+Generate a fresh animation with `--animate`; the committed video is a
+demonstration of this model, not a calibrated hardware simulation.
+
 ## Development sequence
 
 Each row is one logical commit; the formulas and the same compiler script
 evolve together. Cell numbers are zero-based indices in the local research
 notebook, recorded for provenance rather than as a dependency.
 
-| Step | Change | Original cells |
-| --- | --- | --- |
-| 0 | Add introductory SMT examples | 3, 5, 7 |
-| 1 | Add collision-free discrete atom routing | 12 |
-| 2 | Explore MaxSMT preferences for atom routing | 12, 14 |
-| 3 | Support alternative target configurations with SAT routing | 16 |
-| 4 | Model transport with switchable AOD rows and columns | 18 |
-| 5 | Preserve the order of continuously active AOD lines | 20 |
-| 6 | Allow simultaneous AOD row and column motion | 20 -> 23 (concurrent motion only) |
-| 7 | Add CZ interaction and isolation distance constraints | 23 |
-| 8 | Extract reusable SMT constraint functions | 25, 26 |
-| 9 | Require every atom to occupy an AOD or SLM trap | 25, 28 |
-| 10 | Select the largest feasible set of disjoint CZ interactions | 25, 30 |
-| 11 | Schedule successive CZ layers with continuous AOD state | 25, 32 |
+| Step | Commit | Change | Original cells |
+| --- | --- | --- | --- |
+| 0 | `749dc4e` | Add introductory SMT examples | 3, 5, 7 |
+| 1 | `ef0cb9a` | Add collision-free discrete atom routing | 12 |
+| 2 | `98c1b9a` | Explore MaxSMT preferences for atom routing | 12, 14 |
+| 3 | `778ecdd` | Support alternative target configurations with SAT routing | 16 |
+| 4 | `b544987` | Model transport with switchable AOD rows and columns | 18 |
+| 5 | `cb4a4fd` | Preserve the order of continuously active AOD lines | 20 |
+| 6 | `954d12c` | Allow simultaneous AOD row and column motion | 20 -> 23 (concurrent motion only) |
+| 7 | `ea4b48a` | Add CZ interaction and isolation distance constraints | 23 |
+| 8 | `a7f8783` | Extract reusable SMT constraint functions | 25, 26 |
+| 9 | `c7d4a44` | Require every atom to occupy an AOD or SLM trap | 25, 28 |
+| 10 | `9058731` | Select the largest feasible set of disjoint CZ interactions | 25, 30 |
+| 11 | `4642664` | Schedule successive CZ layers with continuous AOD state | 25, 32 |
+
+Inspect an earlier implementation and its matching formulas locally:
+
+```sh
+git show 98c1b9a:solver/compiler.py
+git show 98c1b9a:solver/README.md
+git log --reverse --format="%h %s%n%b" organize-research-history..smt-compiler
+```
 
 ## Solver dependency
 

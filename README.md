@@ -1,5 +1,36 @@
 # Neutral-Atom Quantum Compilation Experiments
 
+## Independent SMT compiler
+
+The main research direction is an independently implemented Z3 prototype
+for a universal neutral-atom quantum compiler. Its current scope is discrete
+atom transport and successive layers of unique, mutually commuting CZ gates
+under a global Rydberg pulse. Each layer first maximizes the number of CZ
+pairs, then minimizes the feasible logical horizon in the configured range.
+
+- [`solver/compiler.py`](solver/compiler.py): the evolving compiler script.
+- [`solver/constraints.py`](solver/constraints.py): reusable SMT constraints.
+- [`solver/README.md`](solver/README.md): LaTeX formulas, assumptions, usage,
+  development commits, and validation.
+- [`solver/smt_introduction.py`](solver/smt_introduction.py): the initial
+  Sudoku-style, graph-coloring, and maze experiments in one introductory step.
+
+```sh
+python3 -m pip install -r solver/requirements.txt
+python3 solver/compiler.py
+python3 -m unittest discover -s solver -p "test_*.py"
+```
+
+The SMT implementation uses Z3 and optional Matplotlib visualization. It is
+independent of the external compilers explored below. The long working
+notebook and Russian deferred questions remain local development material.
+
+[![SMT scheduling demo](solver/media/scheduled_cz_layers.png)](solver/media/scheduled_cz_layers.mp4)
+
+The local branch `organize-research-history` contains the manual compilation
+and external experiments. `smt-compiler` continues that branch with the
+independent SMT development sequence.
+
 ## Manual compilation
 
 [`main.ipynb`](main.ipynb) is an interactive editor for hand-scheduled atom
@@ -98,10 +129,3 @@ but do not optimize calibrated hardware timing or addressability. The example
 includes Hadamards between CZ blocks, so global CZ commutation is not enabled.
 For the external compiler and the corresponding publications, consult the
 [upstream README](https://github.com/UCLA-VAST/DPQA#readme).
-
-## Independent SMT compiler
-
-The main research direction is the independently implemented Z3 compiler in
-[`solver/`](solver/README.md). Its Python code and mathematical README develop
-together through logical commits, beginning with introductory SMT examples.
-The long working notebook remains a local development draft.
