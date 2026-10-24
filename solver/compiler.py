@@ -1,6 +1,6 @@
 """Schedule successive CZ layers with continuous AOD state.
 
-Reconstructed research stage; see README.md for formulas and assumptions.
+See README.md for the model, constraints, and scheduling priority.
 """
 
 import argparse
@@ -285,7 +285,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--animate",
         action="store_true",
-        help="Save an English figure or MP4; MP4 needs ffmpeg.",
+        help="Save a figure or MP4; MP4 needs ffmpeg.",
     )
     parser.add_argument(
         "--output-dir", type=Path, help="Directory for optional figures and animations."

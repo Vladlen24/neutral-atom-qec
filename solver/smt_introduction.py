@@ -1,4 +1,4 @@
-"""Original introductory Z3 experiments, translated into English."""
+"""Introductory Z3 examples: a Latin square, graph coloring, and a maze."""
 
 from z3 import And, Distinct, Int, Not, Or, Solver, sat
 

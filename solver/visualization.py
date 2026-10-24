@@ -1,4 +1,4 @@
-"""Optional English figures and animations for the discrete atom model."""
+"""Figures and animations for the discrete atom model."""
 
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap

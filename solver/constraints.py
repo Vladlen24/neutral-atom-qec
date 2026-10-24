@@ -1,6 +1,6 @@
-"""SMT constraints for the independent discrete neutral-atom model.
+"""SMT constraints for discrete neutral-atom transport and CZ scheduling.
 
-See README.md for C01-C13 and the intentionally retained model assumptions.
+See README.md for the constraint definitions and model assumptions.
 """
 
 from z3 import Abs, And, Implies, Not, Or, PbEq, PbLe

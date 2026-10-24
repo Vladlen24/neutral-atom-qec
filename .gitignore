@@ -9,7 +9,7 @@ mqt_compiler.ipynb
 mqt_qmap_SP.ipynb
 /solver/questions_for_later.txt
 
-# Local research drafts and independent external repositories
+# Excluded notebooks, reference files, and external dependencies
 /solver/play_around_z3.ipynb
 /dpqa_compiler/
 /media/Compiler_for_surface_code_on_reconfigurable_architecture.pdf
@@ -24,5 +24,5 @@ __pycache__/
 .matplotlib/
 /solver/output/
 
-# Original notebook videos may contain local research annotations
+# Notebook-generated videos
 /solver/mapf_*.mp4
