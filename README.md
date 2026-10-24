@@ -23,3 +23,23 @@ configuration and video; the editor's source code is unchanged in this update.
 
 Local research drafts, reference documents, generated files, and independent
 external checkouts are excluded from version control.
+
+## External compiler experiments
+
+These experiments explore existing compilation tools. Their shared input
+circuits are defined in [`circuit.py`](circuit.py): rotated-surface-code and
+Steane-code preparations, graph-state preparations, verified preparations,
+and a hand-scheduled 17-qubit surface-code circuit.
+
+Circuit synthesis uses [MQT QECC](https://github.com/munich-quantum-toolkit/qecc).
+See its [citation guidance](https://github.com/munich-quantum-toolkit/qecc#cite-this)
+for the corresponding state-preparation and verification methods.
+
+Install the experiment dependencies in a separate Python environment:
+
+```sh
+python3 -m pip install -r requirements-experiments.txt
+```
+
+The original notebook environments were not recorded. The requirements list
+the imported packages; it is not a lockfile for those historical environments.
