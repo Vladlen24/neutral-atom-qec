@@ -1,4 +1,4 @@
-"""Add collision-free discrete atom routing.
+"""Explore MaxSMT preferences for atom routing.
 
 Reconstructed research stage; see README.md for formulas and assumptions.
 """
@@ -6,7 +6,7 @@ Reconstructed research stage; see README.md for formulas and assumptions.
 import argparse
 from pathlib import Path
 import time
-from z3 import And, Int, Not, Or, Solver, sat
+from z3 import And, Int, Not, Optimize, Or, Solver, sat
 
 
 def main(animate=False, output_dir=None):
@@ -105,6 +105,53 @@ def main(animate=False, output_dir=None):
             break
         else:
             print(f"UNSAT: no solution ({T} steps may be insufficient).")
+    opt = Optimize()
+    opt.set(priority="lex")
+    opt.add(*s.assertions())
+    for i in range(N):
+        for t in range(T):
+            opt.add_soft(
+                And(atom_x[i][t + 1] == atom_x[i][t], atom_y[i][t + 1] == atom_y[i][t]),
+                weight=1,
+                id="wait",
+            )
+    for i in range(N):
+        for t in range(1, T + 1):
+            opt.add_soft(
+                And(atom_x[i][t] == targets[i][0], atom_y[i][t] == targets[i][1]),
+                weight=1,
+                id="goal",
+            )
+    if opt.check() == sat:
+        optimized_model = opt.model()
+        optimized_paths = [
+            [
+                (
+                    optimized_model[atom_x[i][t]].as_long(),
+                    optimized_model[atom_y[i][t]].as_long(),
+                )
+                for t in range(T + 1)
+            ]
+            for i in range(N)
+        ]
+        optimized_moves = [
+            sum((p != q for p, q in zip(path, path[1:]))) for path in optimized_paths
+        ]
+        print(f"MaxSMT at T={T}:")
+        for i, (path, moves) in enumerate(zip(optimized_paths, optimized_moves)):
+            arrival = path.index(targets[i])
+            print(f"Atom {i}: movements = {moves}, arrival t={arrival}; path: {path}")
+        print(
+            f"Total atom movements: {sum(optimized_moves)} (Solver: {sum(solver_moves)})"
+        )
+        if animate:
+            plot_atom_paths(
+                [[0] * W for _ in range(H)],
+                optimized_paths,
+                output_path=str(Path(output_dir) / "atom_paths.png"),
+            )
+    else:
+        print("Optimize found no solution for this T.")
 
 
 if __name__ == "__main__":

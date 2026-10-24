@@ -80,7 +80,7 @@ than a full quantum-circuit frontend.
 
 ## Current constraint system
 
-Current stage: **Add collision-free discrete atom routing**.
+Current stage: **Explore MaxSMT preferences for atom routing**.
 
 ### C01. Atom bounds and initial positions
 
@@ -111,6 +111,20 @@ avoidance along every continuous trajectory between sampled states.
 Use ordinary `Solver` and accept the first satisfiable horizon in the configured
 ascending range. The upper bound is excluded by `range(MIN_STEPS, MAX_STEPS)`.
 
+## Historical MaxSMT experiment
+
+At the first satisfiable routing horizon $T$, preserve all hard constraints
+and maximize these soft objectives in lexicographic order:
+
+$$\max_{\mathrm{lex}}\left(
+\sum_{i,t<T}[p_i^{t+1}=p_i^t],\quad
+\sum_{i,1\le t\le T}[p_i^t=f_i]\right).$$
+
+The first objective minimizes individual atom movements at this fixed $T$;
+the second prefers occupation of target sites. It is not a separate search
+over $T$. This is an exploratory intermediate implementation, not a requirement
+for the later SAT compiler.
+
 ## Development sequence
 
 Each row is one logical commit; the formulas and the same compiler script
@@ -121,6 +135,7 @@ notebook, recorded for provenance rather than as a dependency.
 | --- | --- | --- |
 | 0 | Add introductory SMT examples | 3, 5, 7 |
 | 1 | Add collision-free discrete atom routing | 12 |
+| 2 | Explore MaxSMT preferences for atom routing | 12, 14 |
 
 ## Solver dependency
 
