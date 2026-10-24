@@ -1,4 +1,4 @@
-"""Support alternative target configurations with SAT routing.
+"""Model transport with switchable AOD rows and columns.
 
 Reconstructed research stage; see README.md for formulas and assumptions.
 """
@@ -6,7 +6,7 @@ Reconstructed research stage; see README.md for formulas and assumptions.
 import argparse
 from pathlib import Path
 import time
-from z3 import And, Int, Not, Or, Solver, sat
+from z3 import Abs, And, Bool, Implies, Int, Not, Or, Solver, is_true, sat
 
 
 def main(animate=False, output_dir=None):
@@ -18,18 +18,25 @@ def main(animate=False, output_dir=None):
             from .visualization import animate_atom_paths, plot_atom_paths
         else:
             from visualization import animate_atom_paths, plot_atom_paths
-    MIN_STEPS = 4
+    MIN_STEPS = 5
     MAX_STEPS = 20
-    W, H = (7, 7)
-    starts = [(0, 0), (0, 6)]
+    W, H = (5, 5)
+    starts = [(0, 0), (3, 1)]
+    targets = [(4, 4), (1, 3)]
     N = len(starts)
-    targets = [[(1, 2), (2, 2)], [(1, 4), (2, 4)]]
-    for T in range(MIN_STEPS, MAX_STEPS):
+    r_max = 2
+    c_max = 2
+    for T in range(MIN_STEPS, MAX_STEPS + 1):
         atom_x = []
         atom_y = []
         for i in range(N):
             atom_x.append([Int(f"a{i}_x_{t}") for t in range(T + 1)])
             atom_y.append([Int(f"a{i}_y_{t}") for t in range(T + 1)])
+        r = []
+        c = []
+        for t in range(T + 1):
+            r.append([(Int(f"r_{i}_{t}"), Bool(f"r_{i}_{t}_on")) for i in range(r_max)])
+            c.append([(Int(f"c_{i}_{t}"), Bool(f"c_{i}_{t}_on")) for i in range(c_max)])
         s = Solver()
         for i in range(N):
             for t in range(T + 1):
@@ -41,40 +48,76 @@ def main(animate=False, output_dir=None):
                         atom_y[i][t] < H,
                     )
                 )
+        for t in range(T + 1):
+            for i in range(r_max):
+                s.add(Implies(r[t][i][1], And(r[t][i][0] >= 0, r[t][i][0] < H)))
+            for i in range(c_max):
+                s.add(Implies(c[t][i][1], And(c[t][i][0] >= 0, c[t][i][0] < W)))
+        for _, enabled in r[0] + c[0]:
+            s.add(Not(enabled))
         for i in range(N):
             s.add(atom_x[i][0] == starts[i][0], atom_y[i][0] == starts[i][1])
-        s.add(
-            Or(
-                [
-                    Or(
-                        And(
-                            atom_x[0][T] == pos_A[0],
-                            atom_y[0][T] == pos_A[1],
-                            atom_x[1][T] == pos_B[0],
-                            atom_y[1][T] == pos_B[1],
-                        ),
-                        And(
-                            atom_x[0][T] == pos_B[0],
-                            atom_y[0][T] == pos_B[1],
-                            atom_x[1][T] == pos_A[0],
-                            atom_y[1][T] == pos_A[1],
-                        ),
+            s.add(atom_x[i][T] == targets[i][0], atom_y[i][T] == targets[i][1])
+        for t in range(T):
+            for j in range(r_max):
+                s.add(
+                    Implies(
+                        And(r[t][j][1], r[t + 1][j][1]),
+                        Abs(r[t + 1][j][0] - r[t][j][0]) <= 1,
                     )
-                    for pos_A, pos_B in targets
+                )
+            for j in range(c_max):
+                s.add(
+                    Implies(
+                        And(c[t][j][1], c[t + 1][j][1]),
+                        Abs(c[t + 1][j][0] - c[t][j][0]) <= 1,
+                    )
+                )
+            switching = Or(
+                *[r[t][j][1] != r[t + 1][j][1] for j in range(r_max)],
+                *[c[t][j][1] != c[t + 1][j][1] for j in range(c_max)],
+            )
+            row_motion = Or(
+                *[
+                    And(r[t][j][1], r[t + 1][j][1], r[t][j][0] != r[t + 1][j][0])
+                    for j in range(r_max)
                 ]
             )
-        )
-        for t in range(T):
-            for ax, ay in zip(atom_x, atom_y):
-                dx = ax[t + 1] - ax[t]
-                dy = ay[t + 1] - ay[t]
+            col_motion = Or(
+                *[
+                    And(c[t][j][1], c[t + 1][j][1], c[t][j][0] != c[t + 1][j][0])
+                    for j in range(c_max)
+                ]
+            )
+            s.add(Implies(switching, And(Not(row_motion), Not(col_motion))))
+            s.add(Not(And(row_motion, col_motion)))
+            for i in range(N):
+                captured_by = []
+                for j in range(r_max):
+                    for k in range(c_max):
+                        captured = And(
+                            r[t][j][1],
+                            c[t][k][1],
+                            atom_y[i][t] == r[t][j][0],
+                            atom_x[i][t] == c[t][k][0],
+                        )
+                        captured_by.append(captured)
+                        s.add(
+                            Implies(
+                                And(Not(switching), captured),
+                                And(
+                                    atom_y[i][t + 1] == r[t + 1][j][0],
+                                    atom_x[i][t + 1] == c[t + 1][k][0],
+                                ),
+                            )
+                        )
                 s.add(
-                    Or(
-                        And(dx == 0, dy == 0),
-                        And(dx == 0, dy == 1),
-                        And(dx == 0, dy == -1),
-                        And(dx == 1, dy == 0),
-                        And(dx == -1, dy == 0),
+                    Implies(
+                        Or(switching, Not(Or(*captured_by))),
+                        And(
+                            atom_x[i][t + 1] == atom_x[i][t],
+                            atom_y[i][t + 1] == atom_y[i][t],
+                        ),
                     )
                 )
         for t in range(T + 1):
@@ -99,10 +142,26 @@ def main(animate=False, output_dir=None):
         if s.check() == sat:
             m = s.model()
             print(f"Solution found in {T} steps:")
+            rows_by_step, columns_by_step = ([], [])
             for t in range(T + 1):
                 print(f"t={t}:")
                 for i in range(N):
                     print(f"      Atom {i} ({m[atom_x[i][t]]}, {m[atom_y[i][t]]})")
+                active_rows = [
+                    (j, m.eval(r[t][j][0]).as_long())
+                    for j in range(r_max)
+                    if is_true(m.eval(r[t][j][1]))
+                ]
+                active_cols = [
+                    (j, m.eval(c[t][j][0]).as_long())
+                    for j in range(c_max)
+                    if is_true(m.eval(c[t][j][1]))
+                ]
+                rows_by_step.append([y for _, y in active_rows])
+                columns_by_step.append([x for _, x in active_cols])
+                print(
+                    f"      Active AOD rows (id, y): {active_rows}; AOD columns (id, x): {active_cols}"
+                )
             solver_paths = [
                 [
                     (m[atom_x[i][t]].as_long(), m[atom_y[i][t]].as_long())
@@ -120,12 +179,15 @@ def main(animate=False, output_dir=None):
                 animate_atom_paths(
                     [[0] * W for _ in range(H)],
                     solver_paths,
-                    marked_cells=[cell for group in targets for cell in group],
-                    output_path=str(Path(output_dir) / "alternative_targets.mp4"),
+                    marked_cells=targets,
+                    rows=rows_by_step,
+                    columns=columns_by_step,
+                    fps=2,
+                    output_path=str(Path(output_dir) / "aod_transport.mp4"),
                 )
             break
         else:
-            print(f"UNSAT: no solution ({T} steps may be insufficient).")
+            print(f"For T={T}: no solution found.")
 
 
 if __name__ == "__main__":

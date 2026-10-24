@@ -80,26 +80,15 @@ than a full quantum-circuit frontend.
 
 ## Current constraint system
 
-Current stage: **Support alternative target configurations with SAT routing**.
+Current stage: **Model transport with switchable AOD rows and columns**.
 
 ### C01. Atom bounds and initial positions
 
 $$\forall i,t:\quad 0\le x_i^t<W,\quad0\le y_i^t<H,\qquad p_i^0=s_i.$$
 
-### C02. Alternative terminal configurations
+### C02. Fixed terminal positions
 
-For two atoms and candidate target-site pairs $F$:
-
-$$
-\bigvee_{(u,v)\in F}
-\left[(p_0^T=u\land p_1^T=v)\lor(p_0^T=v\land p_1^T=u)\right].
-$$
-
-### C03. Independent cardinal motion or waiting
-
-$$p_i^{t+1}-p_i^t\in\{(0,0),(1,0),(-1,0),(0,1),(0,-1)\}.$$
-
-This preliminary routing model does not yet couple atoms through AOD lines.
+$$\forall i:\quad p_i^T=f_i.$$
 
 ### C04. Vertex and swap conflicts
 
@@ -111,10 +100,77 @@ $$\forall i<j,t<T:\quad
 These are discrete vertex/swap constraints. They do not prove collision
 avoidance along every continuous trajectory between sampled states.
 
+### C05. AOD line states and domains
+
+For AOD row $j$, $R_j^t$ is its enabled state and $\rho_j^t$ its integer
+$y$ coordinate. For column $k$, $C_k^t$ and $\gamma_k^t$ give its enabled
+state and integer $x$ coordinate. Coordinates of inactive lines are free.
+
+$$R_j^t\Rightarrow0\le\rho_j^t<H,\qquad
+C_k^t\Rightarrow0\le\gamma_k^t<W.$$
+
+Initially all lines are disabled:
+
+$$\forall j,k:\quad\neg R_j^0\land\neg C_k^0.$$
+
+### C06. Speed of continuously active lines
+
+$$R_j^t\land R_j^{t+1}\Rightarrow
+|\rho_j^{t+1}-\rho_j^t|\le1,$$
+
+$$C_k^t\land C_k^{t+1}\Rightarrow
+|\gamma_k^{t+1}-\gamma_k^t|\le1.$$
+
+This is a discrete displacement bound, not a calibrated capture or velocity
+model. A line can be activated at an otherwise unconstrained in-bounds position.
+
+### C07. Separate switching from motion
+
+Define whether any row or column changes its enabled state:
+
+$$S_t=\left(\bigvee_j R_j^t\ne R_j^{t+1}\right)
+\lor\left(\bigvee_k C_k^t\ne C_k^{t+1}\right).$$
+
+When $S_t$ holds, every continuously active line keeps its coordinate:
+
+$$S_t\land R_j^t\land R_j^{t+1}\Rightarrow\rho_j^{t+1}=\rho_j^t,$$
+
+$$S_t\land C_k^t\land C_k^{t+1}\Rightarrow\gamma_k^{t+1}=\gamma_k^t.$$
+
+### C08. Coordinate-based capture and coupled atom motion
+
+An atom is captured by intersection $(j,k)$ when
+
+$$B_{ijk}^t=R_j^t\land C_k^t\land y_i^t=\rho_j^t\land x_i^t=\gamma_k^t.$$
+
+For every capturing intersection, provided no line switches:
+
+$$\neg S_t\land B_{ijk}^t\Rightarrow
+(x_i^{t+1}=\gamma_k^{t+1}\land y_i^{t+1}=\rho_j^{t+1}).$$
+
+During switching, or without a capturing intersection, the atom waits:
+
+$$\left(S_t\lor\neg\bigvee_{j,k}B_{ijk}^t\right)
+\Rightarrow p_i^{t+1}=p_i^t.$$
+
+Capture is automatic at a coincident active intersection. An explicit
+SLM-to-AOD transfer state, physical capture duration, and accidental-capture
+conditions are not modeled.
+
+### C08a. Temporary single-axis motion restriction
+
+Let $M_r^t$ and $M_c^t$ indicate any continuously active row or column moving.
+At this historical stage:
+
+$$\neg(M_r^t\land M_c^t).$$
+
+**Intermediate limitation:** atoms without a capturing AOD intersection simply
+wait at their current coordinates; continuous trap support is not yet enforced.
+
 ## Horizon search
 
 Use ordinary `Solver` and accept the first satisfiable horizon in the configured
-ascending range. The upper bound is excluded by `range(MIN_STEPS, MAX_STEPS)`.
+ascending range. The configured upper bound is included.
 
 The earlier MaxSMT experiment is retained in Git history. The working compiler
 uses SAT search because additional trajectory optimization was too expensive
@@ -132,6 +188,7 @@ notebook, recorded for provenance rather than as a dependency.
 | 1 | Add collision-free discrete atom routing | 12 |
 | 2 | Explore MaxSMT preferences for atom routing | 12, 14 |
 | 3 | Support alternative target configurations with SAT routing | 16 |
+| 4 | Model transport with switchable AOD rows and columns | 18 |
 
 ## Solver dependency
 
