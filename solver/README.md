@@ -80,7 +80,7 @@ than a full quantum-circuit frontend.
 
 ## Current constraint system
 
-Current stage: **Add CZ interaction and isolation distance constraints**.
+Current stage: **Extract reusable SMT constraint functions**.
 
 ### C01. Atom bounds and initial positions
 
@@ -196,6 +196,24 @@ metric. The physical interpretation of the radius metric and a possible
 future restriction to cardinal movement remain open modeling questions.
 Travel cost and interaction distance are distinct definitions.
 
+## Constraint functions and experimental switches
+
+`constraints.py` contains the named formulas. `use_constraints` in `compiler.py`
+can disable individual groups to reproduce ablation experiments. All switches
+are enabled in the supplied example; disabling a physical constraint changes
+the model and can allow otherwise invalid schedules.
+
+| Formulas | Python functions |
+| --- | --- |
+| C01 | `add_atom_bounds`, `add_initial_atom_positions` |
+| C04 | `add_vertex_conflicts`, `add_swap_conflicts` |
+| C05 | `add_active_line_bounds`, `add_initial_lines_off` |
+| C06 | `add_line_speed_limit` |
+| C07 | `add_no_motion_during_switch` |
+| C08 | `add_captured_atom_motion`, `add_uncaptured_atom_wait` |
+| C09 | `add_line_order` |
+| C10 | `add_interaction_distance`, `add_blockade_distance` |
+
 **Intermediate limitation:** atoms without a capturing AOD intersection simply
 wait at their current coordinates; continuous trap support is not yet enforced.
 
@@ -207,6 +225,15 @@ ascending range. The configured upper bound is included.
 The earlier MaxSMT experiment is retained in Git history. The working compiler
 uses SAT search because additional trajectory optimization was too expensive
 for the intended larger experiments and is not required by the layer priority.
+
+## Validation
+
+```sh
+python3 -m unittest discover -s solver -p "test_*.py"
+```
+
+Small SAT/UNSAT cases check permitted and forbidden configurations independently
+of the default example. The test suite expands with the corresponding constraints.
 
 ## Development sequence
 
@@ -224,6 +251,7 @@ notebook, recorded for provenance rather than as a dependency.
 | 5 | Preserve the order of continuously active AOD lines | 20 |
 | 6 | Allow simultaneous AOD row and column motion | 20 -> 23 (concurrent motion only) |
 | 7 | Add CZ interaction and isolation distance constraints | 23 |
+| 8 | Extract reusable SMT constraint functions | 25, 26 |
 
 ## Solver dependency
 

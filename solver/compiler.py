@@ -1,4 +1,4 @@
-"""Add CZ interaction and isolation distance constraints.
+"""Extract reusable SMT constraint functions.
 
 Reconstructed research stage; see README.md for formulas and assumptions.
 """
@@ -6,7 +6,40 @@ Reconstructed research stage; see README.md for formulas and assumptions.
 import argparse
 from pathlib import Path
 import time
-from z3 import Abs, And, Bool, Implies, Int, Not, Or, Solver, is_true, sat
+from z3 import Bool, Int, Solver, is_true, sat
+
+if __package__:
+    from .constraints import (
+        add_active_line_bounds,
+        add_atom_bounds,
+        add_blockade_distance,
+        add_captured_atom_motion,
+        add_initial_atom_positions,
+        add_initial_lines_off,
+        add_interaction_distance,
+        add_line_order,
+        add_line_speed_limit,
+        add_no_motion_during_switch,
+        add_swap_conflicts,
+        add_uncaptured_atom_wait,
+        add_vertex_conflicts,
+    )
+else:
+    from constraints import (
+        add_active_line_bounds,
+        add_atom_bounds,
+        add_blockade_distance,
+        add_captured_atom_motion,
+        add_initial_atom_positions,
+        add_initial_lines_off,
+        add_interaction_distance,
+        add_line_order,
+        add_line_speed_limit,
+        add_no_motion_during_switch,
+        add_swap_conflicts,
+        add_uncaptured_atom_wait,
+        add_vertex_conflicts,
+    )
 
 
 def main(animate=False, output_dir=None):
@@ -30,6 +63,21 @@ def main(animate=False, output_dir=None):
     N = len(starts)
     r_max = 4
     c_max = 4
+    use_constraints = {
+        "atom_bounds": True,
+        "active_line_bounds": True,
+        "initial_lines_off": True,
+        "initial_atom_positions": True,
+        "line_speed_limit": True,
+        "line_order": True,
+        "no_motion_during_switch": True,
+        "captured_atom_motion": True,
+        "uncaptured_atom_wait": True,
+        "vertex_conflicts": True,
+        "interaction_distance": True,
+        "blockade_distance": True,
+        "swap_conflicts": True,
+    }
     for T in range(MIN_STEPS, MAX_STEPS + 1):
         atom_x = []
         atom_y = []
@@ -42,135 +90,32 @@ def main(animate=False, output_dir=None):
             r.append([(Int(f"r_{i}_{t}"), Bool(f"r_{i}_{t}_on")) for i in range(r_max)])
             c.append([(Int(f"c_{i}_{t}"), Bool(f"c_{i}_{t}_on")) for i in range(c_max)])
         s = Solver()
-        for i in range(N):
-            for t in range(T + 1):
-                s.add(
-                    And(
-                        atom_x[i][t] >= 0,
-                        atom_x[i][t] < W,
-                        atom_y[i][t] >= 0,
-                        atom_y[i][t] < H,
-                    )
-                )
-        for t in range(T + 1):
-            for i in range(r_max):
-                s.add(Implies(r[t][i][1], And(r[t][i][0] >= 0, r[t][i][0] < H)))
-            for i in range(c_max):
-                s.add(Implies(c[t][i][1], And(c[t][i][0] >= 0, c[t][i][0] < W)))
-        for _, enabled in r[0] + c[0]:
-            s.add(Not(enabled))
-        for i in range(N):
-            s.add(atom_x[i][0] == starts[i][0], atom_y[i][0] == starts[i][1])
-        for t in range(T):
-            for j in range(r_max):
-                s.add(
-                    Implies(
-                        And(r[t][j][1], r[t + 1][j][1]),
-                        Abs(r[t + 1][j][0] - r[t][j][0]) <= 1,
-                    )
-                )
-            for j in range(c_max):
-                s.add(
-                    Implies(
-                        And(c[t][j][1], c[t + 1][j][1]),
-                        Abs(c[t + 1][j][0] - c[t][j][0]) <= 1,
-                    )
-                )
-            for lines, count in ((r, r_max), (c, c_max)):
-                for i in range(count):
-                    for j in range(i + 1, count):
-                        both_on = And(
-                            lines[t][i][1],
-                            lines[t][j][1],
-                            lines[t + 1][i][1],
-                            lines[t + 1][j][1],
-                        )
-                        s.add(
-                            Implies(
-                                And(both_on, lines[t][i][0] < lines[t][j][0]),
-                                lines[t + 1][i][0] < lines[t + 1][j][0],
-                            )
-                        )
-                        s.add(
-                            Implies(
-                                And(both_on, lines[t][i][0] > lines[t][j][0]),
-                                lines[t + 1][i][0] > lines[t + 1][j][0],
-                            )
-                        )
-            switching = Or(
-                *[r[t][j][1] != r[t + 1][j][1] for j in range(r_max)],
-                *[c[t][j][1] != c[t + 1][j][1] for j in range(c_max)],
-            )
-            row_motion = Or(
-                *[
-                    And(r[t][j][1], r[t + 1][j][1], r[t][j][0] != r[t + 1][j][0])
-                    for j in range(r_max)
-                ]
-            )
-            col_motion = Or(
-                *[
-                    And(c[t][j][1], c[t + 1][j][1], c[t][j][0] != c[t + 1][j][0])
-                    for j in range(c_max)
-                ]
-            )
-            s.add(Implies(switching, And(Not(row_motion), Not(col_motion))))
-            for i in range(N):
-                captured_by = []
-                for j in range(r_max):
-                    for k in range(c_max):
-                        captured = And(
-                            r[t][j][1],
-                            c[t][k][1],
-                            atom_y[i][t] == r[t][j][0],
-                            atom_x[i][t] == c[t][k][0],
-                        )
-                        captured_by.append(captured)
-                        s.add(
-                            Implies(
-                                And(Not(switching), captured),
-                                And(
-                                    atom_y[i][t + 1] == r[t + 1][j][0],
-                                    atom_x[i][t + 1] == c[t + 1][k][0],
-                                ),
-                            )
-                        )
-                s.add(
-                    Implies(
-                        Or(switching, Not(Or(*captured_by))),
-                        And(
-                            atom_x[i][t + 1] == atom_x[i][t],
-                            atom_y[i][t + 1] == atom_y[i][t],
-                        ),
-                    )
-                )
-        for t in range(T + 1):
-            for i in range(N):
-                for j in range(i + 1, N):
-                    s.add(
-                        Or(atom_x[i][t] != atom_x[j][t], atom_y[i][t] != atom_y[j][t])
-                    )
-        for i in range(N):
-            for j in range(i + 1, N):
-                distance = Abs(atom_x[i][T] - atom_x[j][T]) + Abs(
-                    atom_y[i][T] - atom_y[j][T]
-                )
-                if (i, j) in cz_set:
-                    s.add(distance <= r_int)
-                else:
-                    s.add(distance >= r_block)
-        for t in range(T):
-            for i in range(N):
-                for j in range(i + 1, N):
-                    s.add(
-                        Not(
-                            And(
-                                atom_x[i][t] == atom_x[j][t + 1],
-                                atom_y[i][t] == atom_y[j][t + 1],
-                                atom_x[j][t] == atom_x[i][t + 1],
-                                atom_y[j][t] == atom_y[i][t + 1],
-                            )
-                        )
-                    )
+        if use_constraints["atom_bounds"]:
+            add_atom_bounds(s, atom_x, atom_y, W, H)
+        if use_constraints["active_line_bounds"]:
+            add_active_line_bounds(s, r, c, W, H)
+        if use_constraints["initial_lines_off"]:
+            add_initial_lines_off(s, r, c)
+        if use_constraints["initial_atom_positions"]:
+            add_initial_atom_positions(s, atom_x, atom_y, starts)
+        if use_constraints["line_speed_limit"]:
+            add_line_speed_limit(s, r, c)
+        if use_constraints["line_order"]:
+            add_line_order(s, r, c)
+        if use_constraints["no_motion_during_switch"]:
+            add_no_motion_during_switch(s, r, c)
+        if use_constraints["captured_atom_motion"]:
+            add_captured_atom_motion(s, atom_x, atom_y, r, c)
+        if use_constraints["uncaptured_atom_wait"]:
+            add_uncaptured_atom_wait(s, atom_x, atom_y, r, c)
+        if use_constraints["vertex_conflicts"]:
+            add_vertex_conflicts(s, atom_x, atom_y)
+        if use_constraints["interaction_distance"]:
+            add_interaction_distance(s, atom_x, atom_y, cz_set, r_int)
+        if use_constraints["blockade_distance"]:
+            add_blockade_distance(s, atom_x, atom_y, cz_set, r_block)
+        if use_constraints["swap_conflicts"]:
+            add_swap_conflicts(s, atom_x, atom_y)
         if s.check() == sat:
             m = s.model()
             print(f"Solution found in {T} steps:")
@@ -178,16 +123,18 @@ def main(animate=False, output_dir=None):
             for t in range(T + 1):
                 print(f"t={t}:")
                 for i in range(N):
-                    print(f"      Atom {i} ({m[atom_x[i][t]]}, {m[atom_y[i][t]]})")
+                    print(
+                        f"      Atom {i} ({m.eval(atom_x[i][t], model_completion=True)}, {m.eval(atom_y[i][t], model_completion=True)})"
+                    )
                 active_rows = [
-                    (j, m.eval(r[t][j][0]).as_long())
+                    (j, m.eval(r[t][j][0], model_completion=True).as_long())
                     for j in range(r_max)
-                    if is_true(m.eval(r[t][j][1]))
+                    if is_true(m.eval(r[t][j][1], model_completion=True))
                 ]
                 active_cols = [
-                    (j, m.eval(c[t][j][0]).as_long())
+                    (j, m.eval(c[t][j][0], model_completion=True).as_long())
                     for j in range(c_max)
-                    if is_true(m.eval(c[t][j][1]))
+                    if is_true(m.eval(c[t][j][1], model_completion=True))
                 ]
                 rows_by_step.append([y for _, y in active_rows])
                 columns_by_step.append([x for _, x in active_cols])
@@ -196,7 +143,10 @@ def main(animate=False, output_dir=None):
                 )
             solver_paths = [
                 [
-                    (m[atom_x[i][t]].as_long(), m[atom_y[i][t]].as_long())
+                    (
+                        m.eval(atom_x[i][t], model_completion=True).as_long(),
+                        m.eval(atom_y[i][t], model_completion=True).as_long(),
+                    )
                     for t in range(T + 1)
                 ]
                 for i in range(N)
