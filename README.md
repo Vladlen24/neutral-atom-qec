@@ -98,3 +98,10 @@ but do not optimize calibrated hardware timing or addressability. The example
 includes Hadamards between CZ blocks, so global CZ commutation is not enabled.
 For the external compiler and the corresponding publications, consult the
 [upstream README](https://github.com/UCLA-VAST/DPQA#readme).
+
+## Independent SMT compiler
+
+The main research direction is the independently implemented Z3 compiler in
+[`solver/`](solver/README.md). Its Python code and mathematical README develop
+together through logical commits, beginning with introductory SMT examples.
+The long working notebook remains a local development draft.
