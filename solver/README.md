@@ -56,6 +56,61 @@ $$
 These are standalone SMT learning examples, separate from the physical
 assumptions of the transport model below.
 
+## Running the current compiler stage
+
+```sh
+python3 solver/compiler.py
+python3 solver/compiler.py --animate
+```
+
+Edit the example parameters at the start of `main()` in `compiler.py` to
+reproduce a different instance. The default run solves and prints a schedule;
+`--animate` additionally writes figures or MP4 files under `solver/output/`.
+Use `--output-dir PATH` to choose another location. Generated output is not
+versioned. Every historical stage is a runnable snapshot.
+
+## Notation
+
+Atoms are indexed by $i$, and logical states by $t=0,\ldots,T$.
+The integer position is $p_i^t=(x_i^t,y_i^t)$ on
+$G=\{0,\ldots,W-1\}\times\{0,\ldots,H-1\}$.
+The horizon $T$ counts logical transitions, not calibrated hardware time.
+Atom identities are fixed; this is a transport/scheduling prototype rather
+than a full quantum-circuit frontend.
+
+## Current constraint system
+
+Current stage: **Add collision-free discrete atom routing**.
+
+### C01. Atom bounds and initial positions
+
+$$\forall i,t:\quad 0\le x_i^t<W,\quad0\le y_i^t<H,\qquad p_i^0=s_i.$$
+
+### C02. Fixed terminal positions
+
+$$\forall i:\quad p_i^T=f_i.$$
+
+### C03. Independent cardinal motion or waiting
+
+$$p_i^{t+1}-p_i^t\in\{(0,0),(1,0),(-1,0),(0,1),(0,-1)\}.$$
+
+This preliminary routing model does not yet couple atoms through AOD lines.
+
+### C04. Vertex and swap conflicts
+
+$$\forall i<j,t:\quad p_i^t\ne p_j^t.$$
+
+$$\forall i<j,t<T:\quad
+\neg(p_i^t=p_j^{t+1}\land p_j^t=p_i^{t+1}).$$
+
+These are discrete vertex/swap constraints. They do not prove collision
+avoidance along every continuous trajectory between sampled states.
+
+## Horizon search
+
+Use ordinary `Solver` and accept the first satisfiable horizon in the configured
+ascending range. The upper bound is excluded by `range(MIN_STEPS, MAX_STEPS)`.
+
 ## Development sequence
 
 Each row is one logical commit; the formulas and the same compiler script
@@ -65,6 +120,7 @@ notebook, recorded for provenance rather than as a dependency.
 | Step | Change | Original cells |
 | --- | --- | --- |
 | 0 | Add introductory SMT examples | 3, 5, 7 |
+| 1 | Add collision-free discrete atom routing | 12 |
 
 ## Solver dependency
 
