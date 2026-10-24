@@ -3,7 +3,7 @@
 See README.md for C01-C13 and the intentionally retained model assumptions.
 """
 
-from z3 import Abs, And, Implies, Not, Or
+from z3 import Abs, And, Implies, Not, Or, PbEq, PbLe
 
 
 def add_atom_bounds(s, atom_x, atom_y, W, H):
@@ -173,23 +173,38 @@ def _final_distance(atom_x, atom_y, i, j):
     return Abs(atom_x[i][-1] - atom_x[j][-1]) + Abs(atom_y[i][-1] - atom_y[j][-1])
 
 
-def add_interaction_distance(s, atom_x, atom_y, cz_set, r_int):
-    """Bring every required CZ pair within r_int."""
+def add_interaction_distance(s, atom_x, atom_y, cz_set, r_int, chosen=None):
+    """Bring selected CZ pairs within r_int; without selection, constrain every required pair."""
     for i in range(len(atom_x)):
         for j in range(i + 1, len(atom_x)):
             if (i, j) in cz_set:
                 close = _final_distance(atom_x, atom_y, i, j) <= r_int
-                s.add(close)
+                s.add(close if chosen is None else Implies(chosen[i, j], close))
 
 
-def add_blockade_distance(s, atom_x, atom_y, cz_set, r_block):
-    """Keep every nonrequired pair at least r_block apart."""
+def add_blockade_distance(s, atom_x, atom_y, cz_set, r_block, chosen=None):
+    """Keep unselected and noncandidate pairs at least r_block apart at the final step."""
     for i in range(len(atom_x)):
         for j in range(i + 1, len(atom_x)):
             pair = (i, j)
             far = _final_distance(atom_x, atom_y, i, j) >= r_block
             if pair not in cz_set:
                 s.add(far)
+            elif chosen is not None:
+                s.add(Implies(Not(chosen[pair]), far))
+
+
+def add_selected_pair_count(s, chosen, count):
+    """Select exactly count CZ pairs for the current Rydberg layer."""
+    s.add(PbEq([(selected, 1) for selected in chosen.values()], count))
+
+
+def add_one_pair_per_atom(s, chosen, atom_count):
+    """Allow at most one selected CZ pair per atom in a layer."""
+    for atom in range(atom_count):
+        incident = [selected for pair, selected in chosen.items() if atom in pair]
+        if len(incident) > 1:
+            s.add(PbLe([(selected, 1) for selected in incident], 1))
 
 
 def add_swap_conflicts(s, atom_x, atom_y):

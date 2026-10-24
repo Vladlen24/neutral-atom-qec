@@ -1,4 +1,4 @@
-"""Require every atom to occupy an AOD or SLM trap.
+"""Select the largest feasible set of disjoint CZ interactions.
 
 Reconstructed research stage; see README.md for formulas and assumptions.
 """
@@ -6,7 +6,7 @@ Reconstructed research stage; see README.md for formulas and assumptions.
 import argparse
 from pathlib import Path
 import time
-from z3 import Bool, Int, Solver, is_true, sat
+from z3 import Bool, Int, Solver, is_false, is_true, unknown, unsat
 
 if __package__:
     from .constraints import (
@@ -20,6 +20,8 @@ if __package__:
         add_line_order,
         add_line_speed_limit,
         add_no_motion_during_switch,
+        add_one_pair_per_atom,
+        add_selected_pair_count,
         add_swap_conflicts,
         add_trap_support,
         add_uncaptured_atom_wait,
@@ -37,6 +39,8 @@ else:
         add_line_order,
         add_line_speed_limit,
         add_no_motion_during_switch,
+        add_one_pair_per_atom,
+        add_selected_pair_count,
         add_swap_conflicts,
         add_trap_support,
         add_uncaptured_atom_wait,
@@ -58,11 +62,11 @@ def main(animate=False, output_dir=None):
     W, H = (5, 5)
     r_int = 1
     r_block = 3
-    start = time.time()
     starts = [(0, 0), (0, 1), (0, 2), (0, 3), (2, 0)]
     slm_sites = starts + [(1, 1), (3, 2), (4, 4)]
-    cz_pairs = [(0, 2), (1, 3)]
-    cz_set = {tuple(sorted(pair)) for pair in cz_pairs}
+    cz_pairs = [(0, 2), (1, 3), (0, 4)]
+    pairs = sorted({tuple(sorted(pair)) for pair in cz_pairs})
+    cz_set = set(pairs)
     N = len(starts)
     r_max = 4
     c_max = 4
@@ -82,56 +86,83 @@ def main(animate=False, output_dir=None):
         "swap_conflicts": True,
         "trap_support": True,
     }
-    for T in range(MIN_STEPS, MAX_STEPS + 1):
-        atom_x = []
-        atom_y = []
-        for i in range(N):
-            atom_x.append([Int(f"a{i}_x_{t}") for t in range(T + 1)])
-            atom_y.append([Int(f"a{i}_y_{t}") for t in range(T + 1)])
-        r = []
-        c = []
-        for t in range(T + 1):
-            r.append([(Int(f"r_{i}_{t}"), Bool(f"r_{i}_{t}_on")) for i in range(r_max)])
-            c.append([(Int(f"c_{i}_{t}"), Bool(f"c_{i}_{t}_on")) for i in range(c_max)])
-        s = Solver()
-        if use_constraints["atom_bounds"]:
-            add_atom_bounds(s, atom_x, atom_y, W, H)
-        if use_constraints["active_line_bounds"]:
-            add_active_line_bounds(s, r, c, W, H)
-        if use_constraints["initial_lines_off"]:
-            add_initial_lines_off(s, r, c)
-        if use_constraints["initial_atom_positions"]:
-            add_initial_atom_positions(s, atom_x, atom_y, starts)
-        if use_constraints["line_speed_limit"]:
-            add_line_speed_limit(s, r, c)
-        if use_constraints["line_order"]:
-            add_line_order(s, r, c)
-        if use_constraints["no_motion_during_switch"]:
-            add_no_motion_during_switch(s, r, c)
-        if use_constraints["captured_atom_motion"]:
-            add_captured_atom_motion(s, atom_x, atom_y, r, c)
-        if use_constraints["uncaptured_atom_wait"]:
-            add_uncaptured_atom_wait(s, atom_x, atom_y, r, c)
-        if use_constraints["vertex_conflicts"]:
-            add_vertex_conflicts(s, atom_x, atom_y)
-        if use_constraints["interaction_distance"]:
-            add_interaction_distance(s, atom_x, atom_y, cz_set, r_int)
-        if use_constraints["blockade_distance"]:
-            add_blockade_distance(s, atom_x, atom_y, cz_set, r_block)
-        if use_constraints["swap_conflicts"]:
-            add_swap_conflicts(s, atom_x, atom_y)
-        if use_constraints["trap_support"]:
-            add_trap_support(s, atom_x, atom_y, r, c, slm_sites)
-        if s.check() == sat:
+    start = time.time()
+    solution_found = False
+    for pair_count in range(len(pairs), 0, -1):
+        for T in range(MIN_STEPS, MAX_STEPS + 1):
+            atom_x = [[Int(f"a{i}_x_{t}") for t in range(T + 1)] for i in range(N)]
+            atom_y = [[Int(f"a{i}_y_{t}") for t in range(T + 1)] for i in range(N)]
+            r = [
+                [(Int(f"r_{j}_{t}"), Bool(f"r_{j}_{t}_on")) for j in range(r_max)]
+                for t in range(T + 1)
+            ]
+            c = [
+                [(Int(f"c_{j}_{t}"), Bool(f"c_{j}_{t}_on")) for j in range(c_max)]
+                for t in range(T + 1)
+            ]
+            chosen = {pair: Bool(f"chosen_{pair[0]}_{pair[1]}") for pair in pairs}
+            s = Solver()
+            add_selected_pair_count(s, chosen, pair_count)
+            add_one_pair_per_atom(s, chosen, N)
+            if use_constraints["atom_bounds"]:
+                add_atom_bounds(s, atom_x, atom_y, W, H)
+            if use_constraints["active_line_bounds"]:
+                add_active_line_bounds(s, r, c, W, H)
+            if use_constraints["initial_lines_off"]:
+                add_initial_lines_off(s, r, c)
+            if use_constraints["initial_atom_positions"]:
+                add_initial_atom_positions(s, atom_x, atom_y, starts)
+            if use_constraints["line_speed_limit"]:
+                add_line_speed_limit(s, r, c)
+            if use_constraints["line_order"]:
+                add_line_order(s, r, c)
+            if use_constraints["no_motion_during_switch"]:
+                add_no_motion_during_switch(s, r, c)
+            if use_constraints["captured_atom_motion"]:
+                add_captured_atom_motion(s, atom_x, atom_y, r, c)
+            if use_constraints["uncaptured_atom_wait"]:
+                add_uncaptured_atom_wait(s, atom_x, atom_y, r, c)
+            if use_constraints["vertex_conflicts"]:
+                add_vertex_conflicts(s, atom_x, atom_y)
+            if use_constraints["interaction_distance"]:
+                add_interaction_distance(s, atom_x, atom_y, cz_set, r_int, chosen)
+            if use_constraints["blockade_distance"]:
+                add_blockade_distance(s, atom_x, atom_y, cz_set, r_block, chosen)
+            if use_constraints["swap_conflicts"]:
+                add_swap_conflicts(s, atom_x, atom_y)
+            if use_constraints["trap_support"]:
+                add_trap_support(s, atom_x, atom_y, r, c, slm_sites)
+            result = s.check()
+            if result == unsat:
+                print(f"K={pair_count}, T={T}: UNSAT")
+                continue
+            if result == unknown:
+                raise RuntimeError(
+                    f"K={pair_count}, T={T}: UNKNOWN ({s.reason_unknown()})"
+                )
             m = s.model()
-            print(f"Solution found in {T} steps:")
+            selected = [
+                pair
+                for pair in pairs
+                if is_true(m.eval(chosen[pair], model_completion=True))
+            ]
+            deferred = [
+                pair
+                for pair in pairs
+                if is_false(m.eval(chosen[pair], model_completion=True))
+            ]
+            print(
+                f"Solution found in {T} steps; simultaneous CZ pairs: {len(selected)}"
+            )
+            print(f"Selected CZ pairs (chosen=1): {selected}")
+            print(f"Deferred CZ pairs (chosen=0): {deferred}")
             rows_by_step, columns_by_step = ([], [])
             for t in range(T + 1):
                 print(f"t={t}:")
                 for i in range(N):
-                    print(
-                        f"      Atom {i} ({m.eval(atom_x[i][t], model_completion=True)}, {m.eval(atom_y[i][t], model_completion=True)})"
-                    )
+                    x = m.eval(atom_x[i][t], model_completion=True).as_long()
+                    y = m.eval(atom_y[i][t], model_completion=True).as_long()
+                    print(f"      Atom {i} ({x}, {y})")
                 active_rows = [
                     (j, m.eval(r[t][j][0], model_completion=True).as_long())
                     for j in range(r_max)
@@ -171,13 +202,15 @@ def main(animate=False, output_dir=None):
                     rows=rows_by_step,
                     columns=columns_by_step,
                     fps=2,
-                    output_path=str(Path(output_dir) / "trap_supported_transport.mp4"),
+                    output_path=str(Path(output_dir) / "selected_cz_pairs.mp4"),
                 )
+            solution_found = True
             break
-        else:
-            print(f"For T={T}: no solution found.")
-    end = time.time()
-    print(f"Execution time: {round(end - start)} s")
+        if solution_found:
+            break
+    if not solution_found:
+        print("No required CZ pair is feasible in the specified horizon range.")
+    print(f"Execution time: {round(time.time() - start)} s")
 
 
 if __name__ == "__main__":

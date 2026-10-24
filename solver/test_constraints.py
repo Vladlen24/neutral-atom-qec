@@ -2,7 +2,7 @@
 
 import unittest
 
-from z3 import BoolVal, IntVal, Solver, sat, unsat
+from z3 import Bool, BoolVal, IntVal, Not, Solver, is_true, sat, unsat
 
 from solver import constraints
 
@@ -132,6 +132,35 @@ class TrapSupportExamples(unittest.TestCase):
         for slm_sites, expected in [([], unsat), ([(0, 0)], sat)]:
             solver = Solver()
             constraints.add_trap_support(solver, x, y, rows, columns, slm_sites)
+            self.assertEqual(solver.check(), expected)
+
+
+class PairSelectionExamples(unittest.TestCase):
+    def test_overlapping_cz_pairs_cannot_share_a_layer(self):
+        chosen = {(0, 1): Bool("choose_01"), (0, 2): Bool("choose_02")}
+        solver = Solver()
+        constraints.add_one_pair_per_atom(solver, chosen, 3)
+        constraints.add_selected_pair_count(solver, chosen, 2)
+        self.assertEqual(solver.check(), unsat)
+
+    def test_lower_cardinality_can_choose_either_candidate(self):
+        chosen = {(0, 1): Bool("choose_01"), (0, 2): Bool("choose_02")}
+        for excluded, remaining in [((0, 1), (0, 2)), ((0, 2), (0, 1))]:
+            with self.subTest(excluded=excluded):
+                solver = Solver()
+                constraints.add_one_pair_per_atom(solver, chosen, 3)
+                constraints.add_selected_pair_count(solver, chosen, 1)
+                solver.add(Not(chosen[excluded]))
+                self.assertEqual(solver.check(), sat)
+                self.assertTrue(is_true(solver.model().eval(chosen[remaining])))
+
+    def test_unselected_candidate_is_subject_to_isolation(self):
+        x, y = atom_coordinates([(0, 0)], [(1, 0)])
+        for selected, expected in [(True, sat), (False, unsat)]:
+            solver = Solver()
+            chosen = {(0, 1): BoolVal(selected)}
+            constraints.add_interaction_distance(solver, x, y, {(0, 1)}, 1, chosen)
+            constraints.add_blockade_distance(solver, x, y, {(0, 1)}, 3, chosen)
             self.assertEqual(solver.check(), expected)
 
 

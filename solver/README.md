@@ -80,7 +80,7 @@ than a full quantum-circuit frontend.
 
 ## Current constraint system
 
-Current stage: **Require every atom to occupy an AOD or SLM trap**.
+Current stage: **Select the largest feasible set of disjoint CZ interactions**.
 
 ### C01. Atom bounds and initial positions
 
@@ -179,11 +179,11 @@ boundary only, use the intentional discrete Manhattan approximation:
 
 $$d_{ij}(T)=|x_i^T-x_j^T|+|y_i^T-y_j^T|.$$
 
-For the required unique unordered CZ-pair set $E$:
+For the selected unique unordered CZ-pair set $E_\ell^{\mathrm{selected}}$:
 
-$$\{i,j\}\in E\Rightarrow d_{ij}(T)\le r_{\mathrm{int}},$$
+$$\{i,j\}\in E_\ell^{\mathrm{selected}}\Rightarrow d_{ij}(T)\le r_{\mathrm{int}},$$
 
-$$\{i,j\}\notin E\Rightarrow d_{ij}(T)\ge r_{\mathrm{block}}.$$
+$$\{i,j\}\notin E_\ell^{\mathrm{selected}}\Rightarrow d_{ij}(T)\ge r_{\mathrm{block}}.$$
 
 The first threshold represents sufficiently good intended interaction; the
 second isolates all unintended pairs, including two spectator atoms. With
@@ -214,6 +214,7 @@ the model and can allow otherwise invalid schedules.
 | C09 | `add_line_order` |
 | C10 | `add_interaction_distance`, `add_blockade_distance` |
 | C11 | `add_trap_support` |
+| C12 | `add_selected_pair_count`, `add_one_pair_per_atom` |
 
 ### C11. Continuous AOD-or-SLM trap support
 
@@ -232,10 +233,34 @@ This preserves the exact research formulation, including its line-wise
 deactivation condition and automatic coordinate-based capture. It does not
 add an explicit transfer-state variable.
 
-## Horizon search
+### C12. Choose disjoint CZ pairs with exact cardinality
 
-Use ordinary `Solver` and accept the first satisfiable horizon in the configured
-ascending range. The configured upper bound is included.
+For each candidate $\{i,j\}\in E_{\mathrm{remaining}}$, introduce a Boolean
+$z_{ij}$; write $[z]$ for its 0/1 indicator. For a trial cardinality $K$:
+
+$$\sum_{\{i,j\}\in E_{\mathrm{remaining}}}[z_{ij}]=K,\qquad
+\forall i:\ \sum_{\{i,j\}\in E_{\mathrm{remaining}}}[z_{ij}]\le1.$$
+
+Here the second sum ranges over edges incident to atom $i$. C10 becomes:
+
+$$z_{ij}\Rightarrow d_{ij}(T)\le r_{\mathrm{int}},$$
+
+$$\neg z_{ij}\Rightarrow d_{ij}(T)\ge r_{\mathrm{block}}.$$
+
+Every pair outside the candidate set also satisfies the isolation bound.
+For each smaller $K$, Z3 can choose a new subset of all remaining pairs;
+no particular edge is removed in advance.
+
+With $\mathcal T=\{T_{\min},\ldots,T_{\max}\}$, the bounded search is:
+
+$$K^*=\max\{K\ge1:\exists T\in\mathcal T\;\operatorname{SAT}(K,T)\},$$
+
+$$T^*=\min\{T\in\mathcal T:\operatorname{SAT}(K^*,T)\}.$$
+
+Layer occupancy has strict priority over the transport horizon. Ordinary
+`Solver` returns a satisfying model at the first feasible $(K,T)$; it does
+not optimize the total number of individual atom movements. Failure to find
+a nonempty layer in the bounded range is reported as a failure for that range.
 
 The earlier MaxSMT experiment is retained in Git history. The working compiler
 uses SAT search because additional trajectory optimization was too expensive
@@ -268,6 +293,7 @@ notebook, recorded for provenance rather than as a dependency.
 | 7 | Add CZ interaction and isolation distance constraints | 23 |
 | 8 | Extract reusable SMT constraint functions | 25, 26 |
 | 9 | Require every atom to occupy an AOD or SLM trap | 25, 28 |
+| 10 | Select the largest feasible set of disjoint CZ interactions | 25, 30 |
 
 ## Solver dependency
 
