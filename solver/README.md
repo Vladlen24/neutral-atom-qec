@@ -80,7 +80,7 @@ than a full quantum-circuit frontend.
 
 ## Current constraint system
 
-Current stage: **Select the largest feasible set of disjoint CZ interactions**.
+Current stage: **Schedule successive CZ layers with continuous AOD state**.
 
 ### C01. Atom bounds and initial positions
 
@@ -215,6 +215,7 @@ the model and can allow otherwise invalid schedules.
 | C10 | `add_interaction_distance`, `add_blockade_distance` |
 | C11 | `add_trap_support` |
 | C12 | `add_selected_pair_count`, `add_one_pair_per_atom` |
+| C13 | `add_initial_line_state; solve_next_layer in compiler.py` |
 
 ### C11. Continuous AOD-or-SLM trap support
 
@@ -266,6 +267,39 @@ The earlier MaxSMT experiment is retained in Git history. The working compiler
 uses SAT search because additional trajectory optimization was too expensive
 for the intended larger experiments and is not required by the layer priority.
 
+### C13. Continuous state between successive CZ layers
+
+For consecutive layers $\ell$ and $\ell+1$:
+
+$$p_{i,\ell+1}^{0}=p_{i,\ell}^{T_\ell},\qquad
+R_{j,\ell+1}^{0}=R_{j,\ell}^{T_\ell},\qquad
+C_{k,\ell+1}^{0}=C_{k,\ell}^{T_\ell}.$$
+
+For every carried active line, also equate its boundary coordinate. Inactive
+line coordinates remain free. Only the first layer initializes all lines off;
+this replaces the unconditional initial-off condition in C05 for later layers.
+Remove selected edges from the remaining set and solve again:
+
+$$E_{\ell+1}=E_\ell\setminus E_\ell^{\mathrm{selected}}.$$
+
+The end state of one layer and the start state of the next are one state:
+
+$$T_{\mathrm{total}}=\sum_\ell T_\ell.$$
+
+There is no extra boundary transition. Rydberg pulses mark the layer endpoints
+and do not consume a separately calibrated gate duration in this model.
+
+All input CZ pairs are unique and mutually commuting in the current mode.
+The algorithm prioritizes each successive layer; it does not search globally
+over all future layer choices. Full circuit dependencies, repeated CZ gates
+interleaved with other operations, and single-qubit scheduling are future work.
+
+Export the computed schedule for inspection:
+
+```sh
+python3 solver/compiler.py --json solver/output/schedule.json
+```
+
 ## Validation
 
 ```sh
@@ -294,6 +328,7 @@ notebook, recorded for provenance rather than as a dependency.
 | 8 | Extract reusable SMT constraint functions | 25, 26 |
 | 9 | Require every atom to occupy an AOD or SLM trap | 25, 28 |
 | 10 | Select the largest feasible set of disjoint CZ interactions | 25, 30 |
+| 11 | Schedule successive CZ layers with continuous AOD state | 25, 32 |
 
 ## Solver dependency
 

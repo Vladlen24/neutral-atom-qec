@@ -28,6 +28,15 @@ def add_initial_lines_off(s, r, c):
         s.add(Not(on))
 
 
+def add_initial_line_state(s, r, c, initial_rows, initial_cols):
+    """Set the initial AOD line state; coordinates of inactive lines remain unconstrained."""
+    for lines, initial in ((r, initial_rows), (c, initial_cols)):
+        for (position, on), (initial_position, initial_on) in zip(lines[0], initial):
+            s.add(on == initial_on)
+            if initial_on:
+                s.add(position == initial_position)
+
+
 def add_initial_atom_positions(s, atom_x, atom_y, starts):
     """Fix initial atom coordinates from starts."""
     for i, (x, y) in enumerate(starts):

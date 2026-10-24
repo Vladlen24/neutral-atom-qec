@@ -2,7 +2,7 @@
 
 import unittest
 
-from z3 import Bool, BoolVal, IntVal, Not, Solver, is_true, sat, unsat
+from z3 import Bool, BoolVal, Int, IntVal, Not, Solver, is_true, sat, unsat
 
 from solver import constraints
 
@@ -162,6 +162,27 @@ class PairSelectionExamples(unittest.TestCase):
             constraints.add_interaction_distance(solver, x, y, {(0, 1)}, 1, chosen)
             constraints.add_blockade_distance(solver, x, y, {(0, 1)}, 3, chosen)
             self.assertEqual(solver.check(), expected)
+
+
+class LayerStateExamples(unittest.TestCase):
+    def test_carried_active_line_keeps_coordinate_and_identity(self):
+        rows = [
+            [
+                (Int("carried_row_0"), Bool("carried_row_0_on")),
+                (Int("carried_row_1"), Bool("carried_row_1_on")),
+            ]
+        ]
+        columns = [[]]
+        solver = Solver()
+        constraints.add_initial_line_state(
+            solver, rows, columns, [(None, False), (2, True)], []
+        )
+        solver.add(rows[0][0][0] == 999)
+        self.assertEqual(solver.check(), sat)
+        self.assertFalse(is_true(solver.model().eval(rows[0][0][1])))
+        self.assertTrue(is_true(solver.model().eval(rows[0][1][1])))
+        solver.add(rows[0][1][0] != 2)
+        self.assertEqual(solver.check(), unsat)
 
 
 if __name__ == "__main__":

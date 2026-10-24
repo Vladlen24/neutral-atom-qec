@@ -1,4 +1,4 @@
-"""Select the largest feasible set of disjoint CZ interactions.
+"""Schedule successive CZ layers with continuous AOD state.
 
 Reconstructed research stage; see README.md for formulas and assumptions.
 """
@@ -6,6 +6,7 @@ Reconstructed research stage; see README.md for formulas and assumptions.
 import argparse
 from pathlib import Path
 import time
+import json
 from z3 import Bool, Int, Solver, is_false, is_true, unknown, unsat
 
 if __package__:
@@ -15,6 +16,7 @@ if __package__:
         add_blockade_distance,
         add_captured_atom_motion,
         add_initial_atom_positions,
+        add_initial_line_state,
         add_initial_lines_off,
         add_interaction_distance,
         add_line_order,
@@ -34,6 +36,7 @@ else:
         add_blockade_distance,
         add_captured_atom_motion,
         add_initial_atom_positions,
+        add_initial_line_state,
         add_initial_lines_off,
         add_interaction_distance,
         add_line_order,
@@ -64,7 +67,7 @@ def main(animate=False, output_dir=None):
     r_block = 3
     starts = [(0, 0), (0, 1), (0, 2), (0, 3), (2, 0)]
     slm_sites = starts + [(1, 1), (3, 2), (4, 4)]
-    cz_pairs = [(0, 2), (1, 3), (0, 4)]
+    cz_pairs = [(0, 1), (0, 2), (0, 3), (0, 4)]
     pairs = sorted({tuple(sorted(pair)) for pair in cz_pairs})
     cz_set = set(pairs)
     N = len(starts)
@@ -86,131 +89,195 @@ def main(animate=False, output_dir=None):
         "swap_conflicts": True,
         "trap_support": True,
     }
-    start = time.time()
-    solution_found = False
-    for pair_count in range(len(pairs), 0, -1):
-        for T in range(MIN_STEPS, MAX_STEPS + 1):
-            atom_x = [[Int(f"a{i}_x_{t}") for t in range(T + 1)] for i in range(N)]
-            atom_y = [[Int(f"a{i}_y_{t}") for t in range(T + 1)] for i in range(N)]
-            r = [
-                [(Int(f"r_{j}_{t}"), Bool(f"r_{j}_{t}_on")) for j in range(r_max)]
-                for t in range(T + 1)
-            ]
-            c = [
-                [(Int(f"c_{j}_{t}"), Bool(f"c_{j}_{t}_on")) for j in range(c_max)]
-                for t in range(T + 1)
-            ]
-            chosen = {pair: Bool(f"chosen_{pair[0]}_{pair[1]}") for pair in pairs}
-            s = Solver()
-            add_selected_pair_count(s, chosen, pair_count)
-            add_one_pair_per_atom(s, chosen, N)
-            if use_constraints["atom_bounds"]:
-                add_atom_bounds(s, atom_x, atom_y, W, H)
-            if use_constraints["active_line_bounds"]:
-                add_active_line_bounds(s, r, c, W, H)
-            if use_constraints["initial_lines_off"]:
-                add_initial_lines_off(s, r, c)
-            if use_constraints["initial_atom_positions"]:
-                add_initial_atom_positions(s, atom_x, atom_y, starts)
-            if use_constraints["line_speed_limit"]:
-                add_line_speed_limit(s, r, c)
-            if use_constraints["line_order"]:
-                add_line_order(s, r, c)
-            if use_constraints["no_motion_during_switch"]:
-                add_no_motion_during_switch(s, r, c)
-            if use_constraints["captured_atom_motion"]:
-                add_captured_atom_motion(s, atom_x, atom_y, r, c)
-            if use_constraints["uncaptured_atom_wait"]:
-                add_uncaptured_atom_wait(s, atom_x, atom_y, r, c)
-            if use_constraints["vertex_conflicts"]:
-                add_vertex_conflicts(s, atom_x, atom_y)
-            if use_constraints["interaction_distance"]:
-                add_interaction_distance(s, atom_x, atom_y, cz_set, r_int, chosen)
-            if use_constraints["blockade_distance"]:
-                add_blockade_distance(s, atom_x, atom_y, cz_set, r_block, chosen)
-            if use_constraints["swap_conflicts"]:
-                add_swap_conflicts(s, atom_x, atom_y)
-            if use_constraints["trap_support"]:
-                add_trap_support(s, atom_x, atom_y, r, c, slm_sites)
-            result = s.check()
-            if result == unsat:
-                print(f"K={pair_count}, T={T}: UNSAT")
-                continue
-            if result == unknown:
-                raise RuntimeError(
-                    f"K={pair_count}, T={T}: UNKNOWN ({s.reason_unknown()})"
-                )
-            m = s.model()
-            selected = [
-                pair
-                for pair in pairs
-                if is_true(m.eval(chosen[pair], model_completion=True))
-            ]
-            deferred = [
-                pair
-                for pair in pairs
-                if is_false(m.eval(chosen[pair], model_completion=True))
-            ]
-            print(
-                f"Solution found in {T} steps; simultaneous CZ pairs: {len(selected)}"
-            )
-            print(f"Selected CZ pairs (chosen=1): {selected}")
-            print(f"Deferred CZ pairs (chosen=0): {deferred}")
-            rows_by_step, columns_by_step = ([], [])
-            for t in range(T + 1):
-                print(f"t={t}:")
-                for i in range(N):
-                    x = m.eval(atom_x[i][t], model_completion=True).as_long()
-                    y = m.eval(atom_y[i][t], model_completion=True).as_long()
-                    print(f"      Atom {i} ({x}, {y})")
-                active_rows = [
-                    (j, m.eval(r[t][j][0], model_completion=True).as_long())
-                    for j in range(r_max)
-                    if is_true(m.eval(r[t][j][1], model_completion=True))
+
+    def solve_next_layer(
+        current_starts, remaining_pairs, initial_rows, initial_cols, layer_index
+    ):
+        remaining_set = set(remaining_pairs)
+        atom_count = len(current_starts)
+        for pair_count in range(len(remaining_pairs), 0, -1):
+            for T in range(MIN_STEPS, MAX_STEPS + 1):
+                atom_x = [
+                    [Int(f"L{layer_index}_a{i}_x_{t}") for t in range(T + 1)]
+                    for i in range(atom_count)
                 ]
-                active_cols = [
-                    (j, m.eval(c[t][j][0], model_completion=True).as_long())
-                    for j in range(c_max)
-                    if is_true(m.eval(c[t][j][1], model_completion=True))
+                atom_y = [
+                    [Int(f"L{layer_index}_a{i}_y_{t}") for t in range(T + 1)]
+                    for i in range(atom_count)
                 ]
-                rows_by_step.append([y for _, y in active_rows])
-                columns_by_step.append([x for _, x in active_cols])
-                print(
-                    f"      Active AOD rows (id, y): {active_rows}; AOD columns (id, x): {active_cols}"
-                )
-            solver_paths = [
-                [
-                    (
-                        m.eval(atom_x[i][t], model_completion=True).as_long(),
-                        m.eval(atom_y[i][t], model_completion=True).as_long(),
-                    )
+                r = [
+                    [
+                        (
+                            Int(f"L{layer_index}_r_{j}_{t}"),
+                            Bool(f"L{layer_index}_r_{j}_{t}_on"),
+                        )
+                        for j in range(r_max)
+                    ]
                     for t in range(T + 1)
                 ]
-                for i in range(N)
+                c = [
+                    [
+                        (
+                            Int(f"L{layer_index}_c_{j}_{t}"),
+                            Bool(f"L{layer_index}_c_{j}_{t}_on"),
+                        )
+                        for j in range(c_max)
+                    ]
+                    for t in range(T + 1)
+                ]
+                chosen = {
+                    pair: Bool(f"L{layer_index}_chosen_{pair[0]}_{pair[1]}")
+                    for pair in remaining_pairs
+                }
+                s = Solver()
+                add_selected_pair_count(s, chosen, pair_count)
+                add_one_pair_per_atom(s, chosen, atom_count)
+                if use_constraints["atom_bounds"]:
+                    add_atom_bounds(s, atom_x, atom_y, W, H)
+                if use_constraints["active_line_bounds"]:
+                    add_active_line_bounds(s, r, c, W, H)
+                if use_constraints["initial_lines_off"]:
+                    add_initial_line_state(s, r, c, initial_rows, initial_cols)
+                if use_constraints["initial_atom_positions"]:
+                    add_initial_atom_positions(s, atom_x, atom_y, current_starts)
+                if use_constraints["line_speed_limit"]:
+                    add_line_speed_limit(s, r, c)
+                if use_constraints["line_order"]:
+                    add_line_order(s, r, c)
+                if use_constraints["no_motion_during_switch"]:
+                    add_no_motion_during_switch(s, r, c)
+                if use_constraints["captured_atom_motion"]:
+                    add_captured_atom_motion(s, atom_x, atom_y, r, c)
+                if use_constraints["uncaptured_atom_wait"]:
+                    add_uncaptured_atom_wait(s, atom_x, atom_y, r, c)
+                if use_constraints["vertex_conflicts"]:
+                    add_vertex_conflicts(s, atom_x, atom_y)
+                if use_constraints["interaction_distance"]:
+                    add_interaction_distance(
+                        s, atom_x, atom_y, remaining_set, r_int, chosen
+                    )
+                if use_constraints["blockade_distance"]:
+                    add_blockade_distance(
+                        s, atom_x, atom_y, remaining_set, r_block, chosen
+                    )
+                if use_constraints["swap_conflicts"]:
+                    add_swap_conflicts(s, atom_x, atom_y)
+                if use_constraints["trap_support"]:
+                    add_trap_support(s, atom_x, atom_y, r, c, slm_sites)
+                result = s.check()
+                if result == unsat:
+                    print(f"Layer {layer_index}, K={pair_count}, T={T}: UNSAT")
+                    continue
+                if result == unknown:
+                    raise RuntimeError(
+                        f"Layer {layer_index}, K={pair_count}, T={T}: UNKNOWN ({s.reason_unknown()})"
+                    )
+                model = s.model()
+                selected = [
+                    pair
+                    for pair in remaining_pairs
+                    if is_true(model.eval(chosen[pair], model_completion=True))
+                ]
+                deferred = [
+                    pair
+                    for pair in remaining_pairs
+                    if is_false(model.eval(chosen[pair], model_completion=True))
+                ]
+                paths = [
+                    [
+                        (
+                            model.eval(atom_x[i][t], model_completion=True).as_long(),
+                            model.eval(atom_y[i][t], model_completion=True).as_long(),
+                        )
+                        for t in range(T + 1)
+                    ]
+                    for i in range(atom_count)
+                ]
+
+                def read_line_state(lines, t):
+                    state = []
+                    for position, on in lines[t]:
+                        enabled = is_true(model.eval(on, model_completion=True))
+                        coordinate = (
+                            model.eval(position, model_completion=True).as_long()
+                            if enabled
+                            else None
+                        )
+                        state.append((coordinate, enabled))
+                    return state
+
+                row_states = [read_line_state(r, t) for t in range(T + 1)]
+                col_states = [read_line_state(c, t) for t in range(T + 1)]
+                return (T, selected, deferred, paths, row_states, col_states)
+        return None
+
+    pipeline_start = time.time()
+    current_starts = list(starts)
+    remaining_pairs = sorted({tuple(sorted(pair)) for pair in cz_pairs})
+    initial_rows = [(None, False) for _ in range(r_max)]
+    initial_cols = [(None, False) for _ in range(c_max)]
+    all_paths = [[] for _ in current_starts]
+    all_rows, all_cols = ([], [])
+    pulse_layers = []
+    total_steps = 0
+    while remaining_pairs:
+        layer_index = len(pulse_layers) + 1
+        layer = solve_next_layer(
+            current_starts, remaining_pairs, initial_rows, initial_cols, layer_index
+        )
+        if layer is None:
+            raise RuntimeError(
+                f"Could not schedule the remaining CZ pairs: {remaining_pairs}"
+            )
+        T, selected, deferred, paths, row_states, col_states = layer
+        print(f"Layer {layer_index}: T={T}, selected CZ pairs (chosen=1): {selected}")
+        print(f"Deferred CZ pairs (chosen=0): {deferred}")
+        first_frame = 0 if layer_index == 1 else 1
+        for i, path in enumerate(paths):
+            all_paths[i].extend(path[first_frame:])
+        all_rows.extend(
+            [
+                [position for position, on in state if on]
+                for state in row_states[first_frame:]
             ]
-            solver_moves = [
-                sum((p != q for p, q in zip(path, path[1:]))) for path in solver_paths
+        )
+        all_cols.extend(
+            [
+                [position for position, on in state if on]
+                for state in col_states[first_frame:]
             ]
-            for i, moves in enumerate(solver_moves):
-                print(f"Atom {i}: movements = {moves}")
-            print(f"Total atom movements: {sum(solver_moves)}")
-            if animate:
-                animate_atom_paths(
-                    [[0] * W for _ in range(H)],
-                    solver_paths,
-                    marked_cells=slm_sites,
-                    rows=rows_by_step,
-                    columns=columns_by_step,
-                    fps=2,
-                    output_path=str(Path(output_dir) / "selected_cz_pairs.mp4"),
-                )
-            solution_found = True
-            break
-        if solution_found:
-            break
-    if not solution_found:
-        print("No required CZ pair is feasible in the specified horizon range.")
-    print(f"Execution time: {round(time.time() - start)} s")
+        )
+        total_steps += T
+        pulse_layers.append((total_steps, selected))
+        current_starts = [path[-1] for path in paths]
+        initial_rows = row_states[-1]
+        initial_cols = col_states[-1]
+        remaining_pairs = deferred
+        print(
+            f"Atom positions after the layer: {current_starts}; global step: {total_steps}"
+        )
+    print(f"All CZ pairs completed. Layers: {len(pulse_layers)}; steps: {total_steps}.")
+    print(f"Rydberg layers (global step, CZ pairs): {pulse_layers}")
+    print(f"Execution time: {round(time.time() - pipeline_start)} s")
+    if all_paths and all_paths[0]:
+        if animate:
+            animate_atom_paths(
+                [[0] * W for _ in range(H)],
+                all_paths,
+                marked_cells=slm_sites,
+                rows=all_rows,
+                columns=all_cols,
+                rydberg_layers=pulse_layers,
+                fps=2,
+                output_path=str(Path(output_dir) / "scheduled_cz_layers.mp4"),
+            )
+    return {
+        "paths": all_paths,
+        "rows": all_rows,
+        "columns": all_cols,
+        "layers": pulse_layers,
+        "total_steps": total_steps,
+    }
 
 
 if __name__ == "__main__":
@@ -223,5 +290,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--output-dir", type=Path, help="Directory for optional figures and animations."
     )
+    parser.add_argument("--json", type=Path, help="Write the solved schedule as JSON.")
     args = parser.parse_args()
     result = main(animate=args.animate, output_dir=args.output_dir)
+    if args.json is not None:
+        args.json.parent.mkdir(parents=True, exist_ok=True)
+        args.json.write_text(json.dumps(result, indent=2) + "\n")
