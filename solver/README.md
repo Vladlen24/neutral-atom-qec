@@ -80,15 +80,20 @@ than a full quantum-circuit frontend.
 
 ## Current constraint system
 
-Current stage: **Explore MaxSMT preferences for atom routing**.
+Current stage: **Support alternative target configurations with SAT routing**.
 
 ### C01. Atom bounds and initial positions
 
 $$\forall i,t:\quad 0\le x_i^t<W,\quad0\le y_i^t<H,\qquad p_i^0=s_i.$$
 
-### C02. Fixed terminal positions
+### C02. Alternative terminal configurations
 
-$$\forall i:\quad p_i^T=f_i.$$
+For two atoms and candidate target-site pairs $F$:
+
+$$
+\bigvee_{(u,v)\in F}
+\left[(p_0^T=u\land p_1^T=v)\lor(p_0^T=v\land p_1^T=u)\right].
+$$
 
 ### C03. Independent cardinal motion or waiting
 
@@ -111,19 +116,9 @@ avoidance along every continuous trajectory between sampled states.
 Use ordinary `Solver` and accept the first satisfiable horizon in the configured
 ascending range. The upper bound is excluded by `range(MIN_STEPS, MAX_STEPS)`.
 
-## Historical MaxSMT experiment
-
-At the first satisfiable routing horizon $T$, preserve all hard constraints
-and maximize these soft objectives in lexicographic order:
-
-$$\max_{\mathrm{lex}}\left(
-\sum_{i,t<T}[p_i^{t+1}=p_i^t],\quad
-\sum_{i,1\le t\le T}[p_i^t=f_i]\right).$$
-
-The first objective minimizes individual atom movements at this fixed $T$;
-the second prefers occupation of target sites. It is not a separate search
-over $T$. This is an exploratory intermediate implementation, not a requirement
-for the later SAT compiler.
+The earlier MaxSMT experiment is retained in Git history. The working compiler
+uses SAT search because additional trajectory optimization was too expensive
+for the intended larger experiments and is not required by the layer priority.
 
 ## Development sequence
 
@@ -136,6 +131,7 @@ notebook, recorded for provenance rather than as a dependency.
 | 0 | Add introductory SMT examples | 3, 5, 7 |
 | 1 | Add collision-free discrete atom routing | 12 |
 | 2 | Explore MaxSMT preferences for atom routing | 12, 14 |
+| 3 | Support alternative target configurations with SAT routing | 16 |
 
 ## Solver dependency
 
