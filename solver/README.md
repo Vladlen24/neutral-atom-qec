@@ -80,7 +80,7 @@ than a full quantum-circuit frontend.
 
 ## Current constraint system
 
-Current stage: **Preserve the order of continuously active AOD lines**.
+Current stage: **Allow simultaneous AOD row and column motion**.
 
 ### C01. Atom bounds and initial positions
 
@@ -162,13 +162,6 @@ Capture is automatic at a coincident active intersection. An explicit
 SLM-to-AOD transfer state, physical capture duration, and accidental-capture
 conditions are not modeled.
 
-### C08a. Temporary single-axis motion restriction
-
-Let $M_r^t$ and $M_c^t$ indicate any continuously active row or column moving.
-At this historical stage:
-
-$$\neg(M_r^t\land M_c^t).$$
-
 ### C09. Preserve the order of continuously active lines
 
 For rows, define $A_{jm}^t=R_j^t\land R_m^t\land R_j^{t+1}\land R_m^{t+1}$.
@@ -180,6 +173,13 @@ $$A_{jm}^t\land\rho_j^t>\rho_m^t\Rightarrow\rho_j^{t+1}>\rho_m^{t+1}.$$
 The same formulas apply to columns with $C$ and $\gamma$. Equal-coordinate
 or newly activated lines are not made distinct by this rule. There is no
 additional minimum line-separation constraint in the current formulation.
+
+### Concurrent row and column motion
+
+The temporary C08a restriction has been removed. Rows and columns may move
+in the same logical transition, allowing diagonal atom motion. C06, C07,
+and C08 remain active; the independent cardinal-motion rule C03 has been
+replaced by the AOD capture/motion model.
 
 **Intermediate limitation:** atoms without a capturing AOD intersection simply
 wait at their current coordinates; continuous trap support is not yet enforced.
@@ -207,6 +207,7 @@ notebook, recorded for provenance rather than as a dependency.
 | 3 | Support alternative target configurations with SAT routing | 16 |
 | 4 | Model transport with switchable AOD rows and columns | 18 |
 | 5 | Preserve the order of continuously active AOD lines | 20 |
+| 6 | Allow simultaneous AOD row and column motion | 20 -> 23 (concurrent motion only) |
 
 ## Solver dependency
 

@@ -1,4 +1,4 @@
-"""Preserve the order of continuously active AOD lines.
+"""Allow simultaneous AOD row and column motion.
 
 Reconstructed research stage; see README.md for formulas and assumptions.
 """
@@ -132,7 +132,6 @@ def main(animate=False, output_dir=None):
                 ]
             )
             s.add(Implies(switching, And(Not(row_motion), Not(col_motion))))
-            s.add(Not(And(row_motion, col_motion)))
             for i in range(N):
                 captured_by = []
                 for j in range(r_max):
@@ -225,7 +224,7 @@ def main(animate=False, output_dir=None):
                     rows=rows_by_step,
                     columns=columns_by_step,
                     fps=2,
-                    output_path=str(Path(output_dir) / "ordered_aod_transport.mp4"),
+                    output_path=str(Path(output_dir) / "concurrent_aod_transport.mp4"),
                 )
             break
         else:
