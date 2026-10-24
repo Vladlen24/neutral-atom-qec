@@ -80,15 +80,20 @@ than a full quantum-circuit frontend.
 
 ## Current constraint system
 
-Current stage: **Model transport with switchable AOD rows and columns**.
+Current stage: **Preserve the order of continuously active AOD lines**.
 
 ### C01. Atom bounds and initial positions
 
 $$\forall i,t:\quad 0\le x_i^t<W,\quad0\le y_i^t<H,\qquad p_i^0=s_i.$$
 
-### C02. Fixed terminal positions
+### C02. Alternative terminal configurations
 
-$$\forall i:\quad p_i^T=f_i.$$
+For two atoms and candidate target-site pairs $F$:
+
+$$
+\bigvee_{(u,v)\in F}
+\left[(p_0^T=u\land p_1^T=v)\lor(p_0^T=v\land p_1^T=u)\right].
+$$
 
 ### C04. Vertex and swap conflicts
 
@@ -164,6 +169,18 @@ At this historical stage:
 
 $$\neg(M_r^t\land M_c^t).$$
 
+### C09. Preserve the order of continuously active lines
+
+For rows, define $A_{jm}^t=R_j^t\land R_m^t\land R_j^{t+1}\land R_m^{t+1}$.
+
+$$A_{jm}^t\land\rho_j^t<\rho_m^t\Rightarrow\rho_j^{t+1}<\rho_m^{t+1},$$
+
+$$A_{jm}^t\land\rho_j^t>\rho_m^t\Rightarrow\rho_j^{t+1}>\rho_m^{t+1}.$$
+
+The same formulas apply to columns with $C$ and $\gamma$. Equal-coordinate
+or newly activated lines are not made distinct by this rule. There is no
+additional minimum line-separation constraint in the current formulation.
+
 **Intermediate limitation:** atoms without a capturing AOD intersection simply
 wait at their current coordinates; continuous trap support is not yet enforced.
 
@@ -189,6 +206,7 @@ notebook, recorded for provenance rather than as a dependency.
 | 2 | Explore MaxSMT preferences for atom routing | 12, 14 |
 | 3 | Support alternative target configurations with SAT routing | 16 |
 | 4 | Model transport with switchable AOD rows and columns | 18 |
+| 5 | Preserve the order of continuously active AOD lines | 20 |
 
 ## Solver dependency
 

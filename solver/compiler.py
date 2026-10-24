@@ -1,4 +1,4 @@
-"""Model transport with switchable AOD rows and columns.
+"""Preserve the order of continuously active AOD lines.
 
 Reconstructed research stage; see README.md for formulas and assumptions.
 """
@@ -20,12 +20,13 @@ def main(animate=False, output_dir=None):
             from visualization import animate_atom_paths, plot_atom_paths
     MIN_STEPS = 5
     MAX_STEPS = 20
-    W, H = (5, 5)
-    starts = [(0, 0), (3, 1)]
-    targets = [(4, 4), (1, 3)]
+    W, H = (9, 9)
+    start = time.time()
+    starts = [(0, 0), (1, 4)]
+    targets = [[(2, 1), (3, 1)], [(2, 3), (3, 3)]]
     N = len(starts)
-    r_max = 2
-    c_max = 2
+    r_max = 4
+    c_max = 4
     for T in range(MIN_STEPS, MAX_STEPS + 1):
         atom_x = []
         atom_y = []
@@ -57,7 +58,27 @@ def main(animate=False, output_dir=None):
             s.add(Not(enabled))
         for i in range(N):
             s.add(atom_x[i][0] == starts[i][0], atom_y[i][0] == starts[i][1])
-            s.add(atom_x[i][T] == targets[i][0], atom_y[i][T] == targets[i][1])
+        s.add(
+            Or(
+                [
+                    Or(
+                        And(
+                            atom_x[0][T] == pos_A[0],
+                            atom_y[0][T] == pos_A[1],
+                            atom_x[1][T] == pos_B[0],
+                            atom_y[1][T] == pos_B[1],
+                        ),
+                        And(
+                            atom_x[0][T] == pos_B[0],
+                            atom_y[0][T] == pos_B[1],
+                            atom_x[1][T] == pos_A[0],
+                            atom_y[1][T] == pos_A[1],
+                        ),
+                    )
+                    for pos_A, pos_B in targets
+                ]
+            )
+        )
         for t in range(T):
             for j in range(r_max):
                 s.add(
@@ -73,6 +94,27 @@ def main(animate=False, output_dir=None):
                         Abs(c[t + 1][j][0] - c[t][j][0]) <= 1,
                     )
                 )
+            for lines, count in ((r, r_max), (c, c_max)):
+                for i in range(count):
+                    for j in range(i + 1, count):
+                        both_on = And(
+                            lines[t][i][1],
+                            lines[t][j][1],
+                            lines[t + 1][i][1],
+                            lines[t + 1][j][1],
+                        )
+                        s.add(
+                            Implies(
+                                And(both_on, lines[t][i][0] < lines[t][j][0]),
+                                lines[t + 1][i][0] < lines[t + 1][j][0],
+                            )
+                        )
+                        s.add(
+                            Implies(
+                                And(both_on, lines[t][i][0] > lines[t][j][0]),
+                                lines[t + 1][i][0] > lines[t + 1][j][0],
+                            )
+                        )
             switching = Or(
                 *[r[t][j][1] != r[t + 1][j][1] for j in range(r_max)],
                 *[c[t][j][1] != c[t + 1][j][1] for j in range(c_max)],
@@ -179,15 +221,17 @@ def main(animate=False, output_dir=None):
                 animate_atom_paths(
                     [[0] * W for _ in range(H)],
                     solver_paths,
-                    marked_cells=targets,
+                    marked_cells=[cell for group in targets for cell in group],
                     rows=rows_by_step,
                     columns=columns_by_step,
                     fps=2,
-                    output_path=str(Path(output_dir) / "aod_transport.mp4"),
+                    output_path=str(Path(output_dir) / "ordered_aod_transport.mp4"),
                 )
             break
         else:
             print(f"For T={T}: no solution found.")
+    end = time.time()
+    print(f"Execution time: {round(end - start)} s")
 
 
 if __name__ == "__main__":
