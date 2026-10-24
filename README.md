@@ -23,5 +23,5 @@ through the editor's JSON controls to inspect or modify the schedule.
 - [Earlier video](media/atom_config_v2.0.mp4) and
   [configuration](settings/atom_grid_config_v2.0.json).
 
-The repository's [main branch](https://github.com/Vladlen24/https---github.com-Vladlen24-neutral-atom-qec)
+The repository's [main branch](https://github.com/Vladlen24/neutral-atom-qec)
 contains the SMT compiler.
