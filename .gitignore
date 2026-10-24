@@ -1,1 +1,25 @@
 .DS_Store
+atom_grid_config_trivial.json
+atom_grid_config_v2.0_test.json
+atom_grid_config_optimal.json
+atom_path2.ipynb
+visualisation_instructions/*
+__pycache__/*
+mqt_compiler.ipynb
+mqt_qmap_SP.ipynb
+/solver/questions_for_later.txt
+
+# Local research drafts and independent external repositories
+/solver/play_around_z3.ipynb
+/dpqa_compiler/
+/media/Compiler_for_surface_code_on_reconfigurable_architecture.pdf
+/media/NA_surf3_compilers.pdf
+/media/hw_constraints_for_NA_platform.png
+
+# Python environments, caches, and regenerated solver artifacts
+__pycache__/
+*.py[cod]
+.venv/
+.ipynb_checkpoints/
+.matplotlib/
+/solver/output/
