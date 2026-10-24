@@ -1,4 +1,4 @@
-"""Allow simultaneous AOD row and column motion.
+"""Add CZ interaction and isolation distance constraints.
 
 Reconstructed research stage; see README.md for formulas and assumptions.
 """
@@ -19,11 +19,14 @@ def main(animate=False, output_dir=None):
         else:
             from visualization import animate_atom_paths, plot_atom_paths
     MIN_STEPS = 5
-    MAX_STEPS = 20
-    W, H = (9, 9)
+    MAX_STEPS = 10
+    W, H = (5, 5)
+    r_int = 1
+    r_block = 3
     start = time.time()
-    starts = [(0, 0), (1, 4)]
-    targets = [[(2, 1), (3, 1)], [(2, 3), (3, 3)]]
+    starts = [(0, 0), (0, 1), (0, 2), (0, 3), (2, 0)]
+    cz_pairs = [(0, 2), (1, 3)]
+    cz_set = {tuple(sorted(pair)) for pair in cz_pairs}
     N = len(starts)
     r_max = 4
     c_max = 4
@@ -58,27 +61,6 @@ def main(animate=False, output_dir=None):
             s.add(Not(enabled))
         for i in range(N):
             s.add(atom_x[i][0] == starts[i][0], atom_y[i][0] == starts[i][1])
-        s.add(
-            Or(
-                [
-                    Or(
-                        And(
-                            atom_x[0][T] == pos_A[0],
-                            atom_y[0][T] == pos_A[1],
-                            atom_x[1][T] == pos_B[0],
-                            atom_y[1][T] == pos_B[1],
-                        ),
-                        And(
-                            atom_x[0][T] == pos_B[0],
-                            atom_y[0][T] == pos_B[1],
-                            atom_x[1][T] == pos_A[0],
-                            atom_y[1][T] == pos_A[1],
-                        ),
-                    )
-                    for pos_A, pos_B in targets
-                ]
-            )
-        )
         for t in range(T):
             for j in range(r_max):
                 s.add(
@@ -167,6 +149,15 @@ def main(animate=False, output_dir=None):
                     s.add(
                         Or(atom_x[i][t] != atom_x[j][t], atom_y[i][t] != atom_y[j][t])
                     )
+        for i in range(N):
+            for j in range(i + 1, N):
+                distance = Abs(atom_x[i][T] - atom_x[j][T]) + Abs(
+                    atom_y[i][T] - atom_y[j][T]
+                )
+                if (i, j) in cz_set:
+                    s.add(distance <= r_int)
+                else:
+                    s.add(distance >= r_block)
         for t in range(T):
             for i in range(N):
                 for j in range(i + 1, N):
@@ -220,11 +211,11 @@ def main(animate=False, output_dir=None):
                 animate_atom_paths(
                     [[0] * W for _ in range(H)],
                     solver_paths,
-                    marked_cells=[cell for group in targets for cell in group],
+                    marked_cells=[],
                     rows=rows_by_step,
                     columns=columns_by_step,
                     fps=2,
-                    output_path=str(Path(output_dir) / "concurrent_aod_transport.mp4"),
+                    output_path=str(Path(output_dir) / "cz_interactions.mp4"),
                 )
             break
         else:

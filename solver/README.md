@@ -80,20 +80,11 @@ than a full quantum-circuit frontend.
 
 ## Current constraint system
 
-Current stage: **Allow simultaneous AOD row and column motion**.
+Current stage: **Add CZ interaction and isolation distance constraints**.
 
 ### C01. Atom bounds and initial positions
 
 $$\forall i,t:\quad 0\le x_i^t<W,\quad0\le y_i^t<H,\qquad p_i^0=s_i.$$
-
-### C02. Alternative terminal configurations
-
-For two atoms and candidate target-site pairs $F$:
-
-$$
-\bigvee_{(u,v)\in F}
-\left[(p_0^T=u\land p_1^T=v)\lor(p_0^T=v\land p_1^T=u)\right].
-$$
 
 ### C04. Vertex and swap conflicts
 
@@ -181,6 +172,30 @@ in the same logical transition, allowing diagonal atom motion. C06, C07,
 and C08 remain active; the independent cardinal-motion rule C03 has been
 replaced by the AOD capture/motion model.
 
+### C10. CZ quality and unwanted-interaction isolation
+
+The global Rydberg pulse covers every atom in the modeled grid. At the pulse
+boundary only, use the intentional discrete Manhattan approximation:
+
+$$d_{ij}(T)=|x_i^T-x_j^T|+|y_i^T-y_j^T|.$$
+
+For the required unique unordered CZ-pair set $E$:
+
+$$\{i,j\}\in E\Rightarrow d_{ij}(T)\le r_{\mathrm{int}},$$
+
+$$\{i,j\}\notin E\Rightarrow d_{ij}(T)\ge r_{\mathrm{block}}.$$
+
+The first threshold represents sufficiently good intended interaction; the
+second isolates all unintended pairs, including two spectator atoms. With
+$r_{\mathrm{int}}<r_{\mathrm{block}}$, intermediate distances are acceptable
+for neither case at the pulse. These radius constraints are not imposed on
+transport states without a pulse. The current example uses $1$ and $3$.
+
+Diagonal motion is currently allowed even though these radii use the L1
+metric. The physical interpretation of the radius metric and a possible
+future restriction to cardinal movement remain open modeling questions.
+Travel cost and interaction distance are distinct definitions.
+
 **Intermediate limitation:** atoms without a capturing AOD intersection simply
 wait at their current coordinates; continuous trap support is not yet enforced.
 
@@ -208,6 +223,7 @@ notebook, recorded for provenance rather than as a dependency.
 | 4 | Model transport with switchable AOD rows and columns | 18 |
 | 5 | Preserve the order of continuously active AOD lines | 20 |
 | 6 | Allow simultaneous AOD row and column motion | 20 -> 23 (concurrent motion only) |
+| 7 | Add CZ interaction and isolation distance constraints | 23 |
 
 ## Solver dependency
 
