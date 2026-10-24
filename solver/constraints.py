@@ -134,6 +134,32 @@ def add_uncaptured_atom_wait(s, atom_x, atom_y, r, c):
             )
 
 
+def add_trap_support(s, atom_x, atom_y, r, c, slm_sites):
+    """Require SLM or active AOD support; deactivate a line passing through an atom only at an SLM site."""
+    T = len(r) - 1
+    for t in range(T + 1):
+        for i in range(len(atom_x)):
+            on_island = Or(
+                *[And(atom_x[i][t] == x, atom_y[i][t] == y) for x, y in slm_sites]
+            )
+            on_active_row = Or(*[And(on, atom_y[i][t] == y) for y, on in r[t]])
+            on_active_col = Or(*[And(on, atom_x[i][t] == x) for x, on in c[t]])
+            s.add(Or(on_island, And(on_active_row, on_active_col)))
+            if t < T:
+                for j, (y, on) in enumerate(r[t]):
+                    s.add(
+                        Implies(
+                            And(on, Not(r[t + 1][j][1]), atom_y[i][t] == y), on_island
+                        )
+                    )
+                for j, (x, on) in enumerate(c[t]):
+                    s.add(
+                        Implies(
+                            And(on, Not(c[t + 1][j][1]), atom_x[i][t] == x), on_island
+                        )
+                    )
+
+
 def add_vertex_conflicts(s, atom_x, atom_y):
     """Forbid two atoms from occupying the same site at the same step."""
     for t in range(len(atom_x[0])):

@@ -1,4 +1,4 @@
-"""Extract reusable SMT constraint functions.
+"""Require every atom to occupy an AOD or SLM trap.
 
 Reconstructed research stage; see README.md for formulas and assumptions.
 """
@@ -21,6 +21,7 @@ if __package__:
         add_line_speed_limit,
         add_no_motion_during_switch,
         add_swap_conflicts,
+        add_trap_support,
         add_uncaptured_atom_wait,
         add_vertex_conflicts,
     )
@@ -37,6 +38,7 @@ else:
         add_line_speed_limit,
         add_no_motion_during_switch,
         add_swap_conflicts,
+        add_trap_support,
         add_uncaptured_atom_wait,
         add_vertex_conflicts,
     )
@@ -58,6 +60,7 @@ def main(animate=False, output_dir=None):
     r_block = 3
     start = time.time()
     starts = [(0, 0), (0, 1), (0, 2), (0, 3), (2, 0)]
+    slm_sites = starts + [(1, 1), (3, 2), (4, 4)]
     cz_pairs = [(0, 2), (1, 3)]
     cz_set = {tuple(sorted(pair)) for pair in cz_pairs}
     N = len(starts)
@@ -77,6 +80,7 @@ def main(animate=False, output_dir=None):
         "interaction_distance": True,
         "blockade_distance": True,
         "swap_conflicts": True,
+        "trap_support": True,
     }
     for T in range(MIN_STEPS, MAX_STEPS + 1):
         atom_x = []
@@ -116,6 +120,8 @@ def main(animate=False, output_dir=None):
             add_blockade_distance(s, atom_x, atom_y, cz_set, r_block)
         if use_constraints["swap_conflicts"]:
             add_swap_conflicts(s, atom_x, atom_y)
+        if use_constraints["trap_support"]:
+            add_trap_support(s, atom_x, atom_y, r, c, slm_sites)
         if s.check() == sat:
             m = s.model()
             print(f"Solution found in {T} steps:")
@@ -161,11 +167,11 @@ def main(animate=False, output_dir=None):
                 animate_atom_paths(
                     [[0] * W for _ in range(H)],
                     solver_paths,
-                    marked_cells=[],
+                    marked_cells=slm_sites,
                     rows=rows_by_step,
                     columns=columns_by_step,
                     fps=2,
-                    output_path=str(Path(output_dir) / "cz_interactions.mp4"),
+                    output_path=str(Path(output_dir) / "trap_supported_transport.mp4"),
                 )
             break
         else:

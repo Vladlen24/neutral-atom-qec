@@ -80,7 +80,7 @@ than a full quantum-circuit frontend.
 
 ## Current constraint system
 
-Current stage: **Extract reusable SMT constraint functions**.
+Current stage: **Require every atom to occupy an AOD or SLM trap**.
 
 ### C01. Atom bounds and initial positions
 
@@ -213,9 +213,24 @@ the model and can allow otherwise invalid schedules.
 | C08 | `add_captured_atom_motion`, `add_uncaptured_atom_wait` |
 | C09 | `add_line_order` |
 | C10 | `add_interaction_distance`, `add_blockade_distance` |
+| C11 | `add_trap_support` |
 
-**Intermediate limitation:** atoms without a capturing AOD intersection simply
-wait at their current coordinates; continuous trap support is not yet enforced.
+### C11. Continuous AOD-or-SLM trap support
+
+Let $\mathcal S$ be the fixed SLM site set and $L_i^t=(p_i^t\in\mathcal S)$.
+
+$$\forall i,t:\quad L_i^t\lor\bigvee_{j,k}B_{ijk}^t.$$
+
+An atom must be on an SLM site or an active AOD intersection at every state.
+Deactivation of any row or column passing through it requires an SLM site:
+
+$$R_j^t\land\neg R_j^{t+1}\land y_i^t=\rho_j^t\Rightarrow L_i^t,$$
+
+$$C_k^t\land\neg C_k^{t+1}\land x_i^t=\gamma_k^t\Rightarrow L_i^t.$$
+
+This preserves the exact research formulation, including its line-wise
+deactivation condition and automatic coordinate-based capture. It does not
+add an explicit transfer-state variable.
 
 ## Horizon search
 
@@ -252,6 +267,7 @@ notebook, recorded for provenance rather than as a dependency.
 | 6 | Allow simultaneous AOD row and column motion | 20 -> 23 (concurrent motion only) |
 | 7 | Add CZ interaction and isolation distance constraints | 23 |
 | 8 | Extract reusable SMT constraint functions | 25, 26 |
+| 9 | Require every atom to occupy an AOD or SLM trap | 25, 28 |
 
 ## Solver dependency
 

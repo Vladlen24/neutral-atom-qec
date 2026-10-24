@@ -104,5 +104,36 @@ class ConstraintExamples(unittest.TestCase):
                 self.assertEqual(solver.check(), expected)
 
 
+class TrapSupportExamples(unittest.TestCase):
+    def test_atom_needs_an_slm_site_or_a_complete_aod_intersection(self):
+        x, y = atom_coordinates([(1, 1)])
+        for slm_sites, row_on, col_on, expected in [
+            ([], False, False, unsat),
+            ([(1, 1)], False, False, sat),
+            ([], True, True, sat),
+            ([], True, False, unsat),
+        ]:
+            with self.subTest(slm_sites=slm_sites, row_on=row_on, col_on=col_on):
+                solver = Solver()
+                constraints.add_trap_support(
+                    solver,
+                    x,
+                    y,
+                    line_states([(1, row_on)]),
+                    line_states([(1, col_on)]),
+                    slm_sites,
+                )
+                self.assertEqual(solver.check(), expected)
+
+    def test_line_deactivation_requires_slm_even_if_another_line_supports_atom(self):
+        x, y = atom_coordinates([(0, 0), (0, 0)])
+        rows = line_states([(0, True), (0, True)], [(0, False), (0, True)])
+        columns = line_states([(0, True)], [(0, True)])
+        for slm_sites, expected in [([], unsat), ([(0, 0)], sat)]:
+            solver = Solver()
+            constraints.add_trap_support(solver, x, y, rows, columns, slm_sites)
+            self.assertEqual(solver.check(), expected)
+
+
 if __name__ == "__main__":
     unittest.main()
