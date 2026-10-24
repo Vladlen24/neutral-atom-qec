@@ -49,3 +49,17 @@ RY rotations, local RZ rotations, and local CZ gates for the zoned-architecture
 experiment. It removes barriers and measurements, rewrites CX as H-CZ-H,
 and optionally cancels compatible native rotations. Measurement semantics
 are outside this transpilation experiment.
+
+### MQT QMAP: zoned architectures
+
+[`mqt_compiler_zonedNAarch.ipynb`](mqt_compiler_zonedNAarch.ipynb) selects a
+shared source circuit, lowers it to the native gate set, defines storage and
+entanglement zones, and runs the routing-aware compiler. It exports `.naviz`
+and `.namachine` files into the ignored `visualisation_instructions/` folder.
+Open the notebook from the repository root with its dependencies installed.
+
+This experiment uses [MQT QMAP](https://github.com/munich-quantum-toolkit/qmap)
+and exports programs for [MQT NAViz](https://github.com/munich-quantum-toolkit/naviz).
+The [zoned compiler documentation](https://mqt.readthedocs.io/projects/qmap/en/stable/na_zoned_compiler.html)
+describes the routing-aware and routing-agnostic methods and their references.
+See also [QMAP's citation guidance](https://github.com/munich-quantum-toolkit/qmap#cite-this).

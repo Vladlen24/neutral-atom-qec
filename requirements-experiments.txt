@@ -2,3 +2,7 @@
 numpy
 qiskit
 mqt.qecc
+mqt.qmap
+matplotlib
+ipython
+pylatexenc
