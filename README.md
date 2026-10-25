@@ -7,7 +7,8 @@ independently using [Z3](https://github.com/Z3Prover/z3).
 The current model combines AOD-controlled transport, fixed SLM trapping sites,
 and a global Rydberg pulse. For each layer, it prioritizes the number of
 simultaneous CZ gates, then the transport horizon needed to realize them.
-Input interactions are unique, mutually commuting CZ pairs.
+Input CZ operations may repeat. The `preserve_gate_order` constraint preserves
+their input order on each atom; disabling it allows arbitrary reordering.
 
 ## Run
 

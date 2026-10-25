@@ -5,7 +5,65 @@ import io
 import itertools
 import unittest
 
-from solver.compiler import main
+from solver.compiler import get_layer_candidates, index_operations, main
+
+
+class CandidateSelection(unittest.TestCase):
+    def test_shared_atom_predecessors_block_later_operations(self):
+        operations = index_operations(
+            [(0, 1), (0, 5), (0, 8), (2, 3), (2, 4), (1, 6), (2, 6), (6, 7)], 9
+        )
+        self.assertEqual(
+            get_layer_candidates(operations, preserve_gate_order=True),
+            [(0, (0, 1)), (3, (2, 3))],
+        )
+        self.assertEqual(
+            get_layer_candidates(operations, preserve_gate_order=False), operations
+        )
+
+    def test_repeated_pairs_keep_their_original_ids(self):
+        operations = index_operations([(1, 0), (0, 1), (1, 0)], 2)
+        self.assertEqual(operations, [(0, (0, 1)), (1, (0, 1)), (2, (0, 1))])
+        self.assertEqual(get_layer_candidates(operations, True), operations[:1])
+        self.assertEqual(get_layer_candidates(operations[1:], True), operations[1:2])
+        self.assertEqual(get_layer_candidates(operations, False), operations)
+
+    def test_partial_layers_preserve_each_atoms_operation_order(self):
+        edges = list(itertools.combinations(range(4), 2))
+        for size in range(5):
+            for circuit in itertools.product(edges, repeat=size):
+                operations = index_operations(circuit, 4)
+                pending, executed = list(operations), []
+                while pending:
+                    candidates = get_layer_candidates(pending, True)
+                    expected = [
+                        operation
+                        for position, operation in enumerate(pending)
+                        if not any(
+                            set(previous[1]) & set(operation[1])
+                            for previous in pending[:position]
+                        )
+                    ]
+                    self.assertEqual(candidates, expected)
+                    # Keep other ready operations pending to exercise subset deferral.
+                    selected = candidates[-1]
+                    executed.append(selected)
+                    pending = [
+                        operation
+                        for operation in pending
+                        if operation[0] != selected[0]
+                    ]
+                self.assertEqual(sorted(gid for gid, _ in executed), list(range(size)))
+                for atom in range(4):
+                    self.assertEqual(
+                        [gid for gid, pair in executed if atom in pair],
+                        [gid for gid, pair in operations if atom in pair],
+                    )
+
+    def test_invalid_atoms_and_self_interactions_are_rejected(self):
+        for pair in [(0,), (0, 1, 2), (0, 0), (-1, 1), (0, 2), (0, 1.5)]:
+            with self.subTest(pair=pair), self.assertRaises(ValueError):
+                index_operations([pair], 2)
 
 
 class ScheduleExample(unittest.TestCase):
@@ -34,6 +92,10 @@ class ScheduleExample(unittest.TestCase):
         pulse_steps = [step for step, _ in data["layers"]]
         self.assertEqual(pulse_steps, sorted(set(pulse_steps)))
         self.assertEqual(pulse_steps[-1], data["total_steps"])
+        self.assertEqual(
+            data["operation_layers"],
+            [(step, [operation_id]) for operation_id, step in enumerate(pulse_steps)],
+        )
 
     def test_states_and_transitions(self):
         data = self.schedule

@@ -1,7 +1,8 @@
 # SMT compiler model
 
-The compiler schedules unique, mutually commuting CZ interactions between
-neutral atoms on a discrete grid. AOD rows and columns transport atoms;
+The compiler schedules CZ operations between neutral atoms on a discrete grid.
+Repeated operations on the same atom pair retain separate identities.
+AOD rows and columns transport atoms;
 fixed SLM sites provide stationary trapping locations. Each CZ layer ends
 with a global Rydberg pulse.
 
@@ -24,8 +25,10 @@ otherwise.
 | $R_j^t,\rho_j^t$ | Enabled state and vertical coordinate of AOD row $j$ |
 | $C_k^t,\gamma_k^t$ | Enabled state and horizontal coordinate of AOD column $k$ |
 | $\mathcal{S}$ | Fixed SLM site set |
-| $E$ | Remaining unordered CZ pairs |
-| $z_e$ | Boolean selection indicator, written as 0 or 1 in sums |
+| $E$ | Remaining operation IDs, in their original input order |
+| $e_g=\{i,j\}$ | Unordered atom pair for operation $g$ |
+| $\mathcal{A}$ | Operation IDs eligible for the current layer |
+| $z_g$ | Boolean operation-selection indicator, written as 0 or 1 in sums |
 | $r_{\mathrm{int}},r_{\mathrm{block}}$ | Interaction and isolation thresholds |
 
 ## Constraints
@@ -187,7 +190,8 @@ $$
 d_{ij}(T)=|x_i^T-x_j^T|+|y_i^T-y_j^T|.
 $$
 
-For the selected CZ-pair set $E^*=\{e\in E:z_e=1\}$, require
+For the selected physical CZ-pair set
+$E^*=\{e_g:g\in\mathcal{A},\ z_g=1\}$, require
 
 $$
 \{i,j\}\in E^*\Rightarrow d_{ij}(T)\le r_{\mathrm{int}}.
@@ -209,21 +213,23 @@ $r_{\mathrm{int}}=1$ and $r_{\mathrm{block}}=3$.
 
 ### 10. CZ-pair selection
 
-For a trial layer size $K$, select exactly $K$ remaining pairs:
+For a trial layer size $K$, select exactly $K$ eligible operations:
 
 $$
-\sum_{e\in E}z_e=K.
+\sum_{g\in\mathcal{A}}z_g=K.
 $$
 
-An atom participates in at most one selected pair. For its incident edge set
-$E_i=\{e\in E:i\in e\}$:
+An atom participates in at most one selected operation. For its incident
+operation set $\mathcal{A}_i=\{g\in\mathcal{A}:i\in e_g\}$:
 
 $$
-\sum_{e\in E_i}z_e\le1.
+\sum_{g\in\mathcal{A}_i}z_g\le1.
 $$
 
-This creates a layer of disjoint CZ gates. Unselected candidates remain subject
-to the isolation bound in constraint 9.
+This creates a layer of disjoint CZ gates, so repeated operations on the same
+pair require separate pulses. For geometry, a physical pair is selected when
+at least one of its operation indicators is true. An unselected occurrence
+therefore does not impose isolation on a pair selected by another occurrence.
 
 ### 11. State continuity between layers
 
@@ -248,11 +254,12 @@ $$
 C_{k,\ell}^{T_\ell}\Rightarrow\gamma_{k,\ell+1}^{0}=\gamma_{k,\ell}^{T_\ell}.
 $$
 
-Line identities persist; inactive coordinates remain unconstrained. Executed
-pairs are removed, and the remaining interactions are scheduled again:
+Line identities persist; inactive coordinates remain unconstrained. With
+$G_\ell^*=\{g\in\mathcal{A}_\ell:z_g=1\}$, only executed operation IDs are removed.
+The remaining IDs retain their input order:
 
 $$
-E_{\ell+1}=E_\ell\setminus E_\ell^*.
+E_{\ell+1}=E_\ell\setminus G_\ell^*.
 $$
 
 The boundary state is shared, so it adds no extra transition:
@@ -263,6 +270,37 @@ $$
 
 The horizon counts logical transitions. Rydberg pulses mark layer endpoints;
 a separately calibrated gate duration is not included in this count.
+
+### 12. Gate order on each atom
+
+With `use_constraints['preserve_gate_order']=True`, operations sharing an atom
+execute in their input order. For original input indices $h<g$ and execution
+layer $L(g)$:
+
+$$
+e_h\cap e_g\ne\varnothing\Rightarrow L(h)<L(g).
+$$
+
+Before searching over $K$ and $T$, find each pending operation's predecessors:
+
+$$
+D_\ell(g)=\{h\in E_\ell:h<g,\ e_h\cap e_g\ne\varnothing\}.
+$$
+
+Only operations without pending predecessors are candidates:
+
+$$
+\mathcal{A}_\ell=\{g\in E_\ell:D_\ell(g)=\varnothing\}.
+$$
+
+This enforces order by candidate filtering rather than additional SMT variables.
+Disjoint ready operations can share a layer. A deferred operation continues to
+block its successors, even if it was itself blocked in the current layer.
+After a layer, recompute candidates from the remaining ordered operations.
+
+With `preserve_gate_order=False`, $\mathcal{A}_\ell=E_\ell$: all remaining
+operations are candidates. Repeated pairs remain distinct operations in both
+modes; they are never deduplicated or cancelled.
 
 ## Scheduling priority
 
@@ -288,9 +326,10 @@ specified horizon range, rather than globally optimizing all future layers.
 
 ## Scope
 
-The current input is a set of unique, mutually commuting CZ pairs. Full circuit
-dependencies, repeated CZ operations interleaved with other gates, and
-single-qubit scheduling are not yet represented. Positions and time steps are
+The current input is an ordered list of CZ operations, including repeated pairs.
+Order preservation constrains the schedule; it does not change the physical
+commutation properties of CZ gates. Intermediate single-qubit gates and their
+dependencies are not yet represented. Positions and time steps are
 discrete; physical capture dynamics and hardware timing require a more detailed
 model.
 
@@ -302,6 +341,8 @@ Run from the repository root:
 python3 -m unittest discover -s solver -p "test_*.py"
 ```
 
-The tests cover admissible and forbidden constraint configurations, carried
-AOD state, complete CZ coverage, trap support, collisions, and interaction
-distances throughout a computed schedule.
+The tests cover admissible and forbidden constraint configurations, ordered
+candidate selection, repeated operation identities, carried AOD state, complete
+CZ coverage, trap support, collisions, and interaction distances throughout a
+computed schedule. Schedule JSON includes `operation_layers` with the original
+operation IDs alongside the physical pairs in `layers`.

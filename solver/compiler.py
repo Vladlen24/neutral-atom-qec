@@ -7,7 +7,7 @@ import argparse
 from pathlib import Path
 import time
 import json
-from z3 import Bool, Int, Solver, is_false, is_true, unknown, unsat
+from z3 import Bool, Int, Or, PbLe, Solver, is_true, unknown, unsat
 
 if __package__:
     from .constraints import (
@@ -17,12 +17,10 @@ if __package__:
         add_captured_atom_motion,
         add_initial_atom_positions,
         add_initial_line_state,
-        add_initial_lines_off,
         add_interaction_distance,
         add_line_order,
         add_line_speed_limit,
         add_no_motion_during_switch,
-        add_one_pair_per_atom,
         add_selected_pair_count,
         add_swap_conflicts,
         add_trap_support,
@@ -37,12 +35,10 @@ else:
         add_captured_atom_motion,
         add_initial_atom_positions,
         add_initial_line_state,
-        add_initial_lines_off,
         add_interaction_distance,
         add_line_order,
         add_line_speed_limit,
         add_no_motion_during_switch,
-        add_one_pair_per_atom,
         add_selected_pair_count,
         add_swap_conflicts,
         add_trap_support,
@@ -51,15 +47,55 @@ else:
     )
 
 
+# Operation helpers
+# ========================================================================
+def index_operations(cz_pairs, atom_count):
+    """Assign each CZ occurrence its original index, retaining order and repeats."""
+    operations = []
+    for operation_id, pair in enumerate(cz_pairs):
+        if len(pair) != 2:
+            raise ValueError(f"Operation {operation_id} requires two atoms.")
+        i, j = pair
+        if (
+            not isinstance(i, int)
+            or not isinstance(j, int)
+            or not 0 <= i < atom_count
+            or not 0 <= j < atom_count
+            or i == j
+        ):
+            raise ValueError(f"Operation {operation_id} has an invalid CZ pair: {pair}.")
+        operations.append((operation_id, (min(i, j), max(i, j))))
+    return operations
+
+
+def get_layer_candidates(remaining_operations, preserve_gate_order):
+    """Keep operations whose atoms have no pending predecessors when order is required."""
+    if not preserve_gate_order:
+        return list(remaining_operations)
+
+    encountered_atoms = set()
+    candidates = []
+    for operation in remaining_operations:
+        _, pair = operation
+        if encountered_atoms.isdisjoint(pair):
+            candidates.append(operation)
+        # Skipped operations also block their successors on either atom.
+        encountered_atoms.update(pair)
+    return candidates
+
+
 def main(animate=False, output_dir=None):
     """Solve the original example; edit the architecture and program parameters below."""
     if output_dir is None:
         output_dir = Path(__file__).resolve().parent / "output"
     if animate:
         if __package__:
-            from .visualization import animate_atom_paths, plot_atom_paths
+            from .visualization import animate_atom_paths
         else:
-            from visualization import animate_atom_paths, plot_atom_paths
+            from visualization import animate_atom_paths
+
+    # Model parameters and enabled constraints
+    # ========================================================================
     MIN_STEPS = 5
     MAX_STEPS = 10
     W, H = (5, 5)
@@ -68,9 +104,6 @@ def main(animate=False, output_dir=None):
     starts = [(0, 0), (0, 1), (0, 2), (0, 3), (2, 0)]
     slm_sites = starts + [(1, 1), (3, 2), (4, 4)]
     cz_pairs = [(0, 1), (0, 2), (0, 3), (0, 4)]
-    pairs = sorted({tuple(sorted(pair)) for pair in cz_pairs})
-    cz_set = set(pairs)
-    N = len(starts)
     r_max = 4
     c_max = 4
     use_constraints = {
@@ -88,14 +121,25 @@ def main(animate=False, output_dir=None):
         "blockade_distance": True,
         "swap_conflicts": True,
         "trap_support": True,
+        "preserve_gate_order": True,
     }
 
+    # Single-layer solver
+    # ========================================================================
     def solve_next_layer(
-        current_starts, remaining_pairs, initial_rows, initial_cols, layer_index
+        current_starts, remaining_operations, initial_rows, initial_cols, layer_index
     ):
-        remaining_set = set(remaining_pairs)
+        candidates = get_layer_candidates(
+            remaining_operations, use_constraints["preserve_gate_order"]
+        )
+        # This set is only for geometry; operation multiplicity stays in candidates.
+        candidate_pairs = {pair for _, pair in candidates}
         atom_count = len(current_starts)
-        for pair_count in range(len(remaining_pairs), 0, -1):
+        print(f"Layer {layer_index}: candidate operations (ID, pair): {candidates}")
+
+        # Solver variables: maximize the layer size before minimizing its horizon.
+        # ========================================================================
+        for pair_count in range(len(candidates), 0, -1):
             for T in range(MIN_STEPS, MAX_STEPS + 1):
                 atom_x = [
                     [Int(f"L{layer_index}_a{i}_x_{t}") for t in range(T + 1)]
@@ -126,12 +170,33 @@ def main(animate=False, output_dir=None):
                     for t in range(T + 1)
                 ]
                 chosen = {
-                    pair: Bool(f"L{layer_index}_chosen_{pair[0]}_{pair[1]}")
-                    for pair in remaining_pairs
+                    operation_id: Bool(f"L{layer_index}_g{operation_id}_chosen")
+                    for operation_id, pair in candidates
                 }
+                # A physical pair is selected if any of its occurrences is selected.
+                chosen_by_pair = {
+                    pair: Or(
+                        [
+                            chosen[operation_id]
+                            for operation_id, candidate in candidates
+                            if candidate == pair
+                        ]
+                    )
+                    for pair in candidate_pairs
+                }
+
+                # Solver and constraints
+                # ========================================================================
                 s = Solver()
                 add_selected_pair_count(s, chosen, pair_count)
-                add_one_pair_per_atom(s, chosen, atom_count)
+                for atom in range(atom_count):
+                    incident = [
+                        chosen[operation_id]
+                        for operation_id, pair in candidates
+                        if atom in pair
+                    ]
+                    if len(incident) > 1:
+                        s.add(PbLe([(selected, 1) for selected in incident], 1))
                 if use_constraints["atom_bounds"]:
                     add_atom_bounds(s, atom_x, atom_y, W, H)
                 if use_constraints["active_line_bounds"]:
@@ -154,16 +219,19 @@ def main(animate=False, output_dir=None):
                     add_vertex_conflicts(s, atom_x, atom_y)
                 if use_constraints["interaction_distance"]:
                     add_interaction_distance(
-                        s, atom_x, atom_y, remaining_set, r_int, chosen
+                        s, atom_x, atom_y, candidate_pairs, r_int, chosen_by_pair
                     )
                 if use_constraints["blockade_distance"]:
                     add_blockade_distance(
-                        s, atom_x, atom_y, remaining_set, r_block, chosen
+                        s, atom_x, atom_y, candidate_pairs, r_block, chosen_by_pair
                     )
                 if use_constraints["swap_conflicts"]:
                     add_swap_conflicts(s, atom_x, atom_y)
                 if use_constraints["trap_support"]:
                     add_trap_support(s, atom_x, atom_y, r, c, slm_sites)
+
+                # Solve and interpret the model
+                # ========================================================================
                 result = s.check()
                 if result == unsat:
                     print(f"Layer {layer_index}, K={pair_count}, T={T}: UNSAT")
@@ -174,14 +242,15 @@ def main(animate=False, output_dir=None):
                     )
                 model = s.model()
                 selected = [
-                    pair
-                    for pair in remaining_pairs
-                    if is_true(model.eval(chosen[pair], model_completion=True))
+                    (operation_id, pair)
+                    for operation_id, pair in candidates
+                    if is_true(model.eval(chosen[operation_id], model_completion=True))
                 ]
+                selected_ids = {operation_id for operation_id, _ in selected}
                 deferred = [
-                    pair
-                    for pair in remaining_pairs
-                    if is_false(model.eval(chosen[pair], model_completion=True))
+                    operation
+                    for operation in remaining_operations
+                    if operation[0] not in selected_ids
                 ]
                 paths = [
                     [
@@ -211,27 +280,34 @@ def main(animate=False, output_dir=None):
                 return (T, selected, deferred, paths, row_states, col_states)
         return None
 
+    # Multi-layer pipeline
+    # ========================================================================
     pipeline_start = time.time()
     current_starts = list(starts)
-    remaining_pairs = sorted({tuple(sorted(pair)) for pair in cz_pairs})
+    remaining_operations = index_operations(cz_pairs, len(starts))
     initial_rows = [(None, False) for _ in range(r_max)]
     initial_cols = [(None, False) for _ in range(c_max)]
     all_paths = [[] for _ in current_starts]
     all_rows, all_cols = ([], [])
     pulse_layers = []
+    operation_layers = []
     total_steps = 0
-    while remaining_pairs:
+    while remaining_operations:
         layer_index = len(pulse_layers) + 1
         layer = solve_next_layer(
-            current_starts, remaining_pairs, initial_rows, initial_cols, layer_index
+            current_starts, remaining_operations, initial_rows, initial_cols, layer_index
         )
         if layer is None:
             raise RuntimeError(
-                f"Could not schedule the remaining CZ pairs: {remaining_pairs}"
+                f"Could not schedule candidates within T={MIN_STEPS}..{MAX_STEPS}; "
+                f"remaining operations (ID, pair): {remaining_operations}"
             )
         T, selected, deferred, paths, row_states, col_states = layer
-        print(f"Layer {layer_index}: T={T}, selected CZ pairs (chosen=1): {selected}")
-        print(f"Deferred CZ pairs (chosen=0): {deferred}")
+        selected_pairs = [pair for _, pair in selected]
+        selected_ids = [operation_id for operation_id, _ in selected]
+        print(f"Layer {layer_index}: T={T}, selected operations (ID, pair): {selected}")
+        print(f"Deferred operations (ID, pair): {deferred}")
+        # Adjacent layers share their boundary atom and AOD state.
         first_frame = 0 if layer_index == 1 else 1
         for i, path in enumerate(paths):
             all_paths[i].extend(path[first_frame:])
@@ -248,16 +324,20 @@ def main(animate=False, output_dir=None):
             ]
         )
         total_steps += T
-        pulse_layers.append((total_steps, selected))
+        pulse_layers.append((total_steps, selected_pairs))
+        operation_layers.append((total_steps, selected_ids))
         current_starts = [path[-1] for path in paths]
         initial_rows = row_states[-1]
         initial_cols = col_states[-1]
-        remaining_pairs = deferred
+        remaining_operations = deferred
         print(
             f"Atom positions after the layer: {current_starts}; global step: {total_steps}"
         )
-    print(f"All CZ pairs completed. Layers: {len(pulse_layers)}; steps: {total_steps}.")
+    # Visualization and output
+    # ========================================================================
+    print(f"All CZ operations completed. Layers: {len(pulse_layers)}; steps: {total_steps}.")
     print(f"Rydberg layers (global step, CZ pairs): {pulse_layers}")
+    print(f"Executed operations (global step, IDs): {operation_layers}")
     print(f"Execution time: {round(time.time() - pipeline_start)} s")
     if all_paths and all_paths[0]:
         if animate:
@@ -276,11 +356,14 @@ def main(animate=False, output_dir=None):
         "rows": all_rows,
         "columns": all_cols,
         "layers": pulse_layers,
+        "operation_layers": operation_layers,
         "total_steps": total_steps,
     }
 
 
 if __name__ == "__main__":
+    # Command-line interface
+    # ========================================================================
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--animate",
