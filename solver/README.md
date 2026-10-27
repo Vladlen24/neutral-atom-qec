@@ -1,13 +1,13 @@
 # SMT compiler model
 
-The compiler schedules local and global single-qubit rotations with preserved operation order.
+The compiler schedules local and global single-qubit rotations and CZ layers. Local rotations have strict priority among ready operations.
 All layers share the AOD transport and trap-support model below.
 Input rotations use `(atom, ('rx'/'ry'/'rz', angle))` or
-`('global', ('rx'/'ry'/'rz', angle))`.
+`('global', ('rx'/'ry'/'rz', angle))`; `(i, j)` specifies a CZ gate.
 Axes and angles are operation metadata; quantum-state evolution is not simulated.
 
 The `use_constraints` dictionary enables constraint groups. Order preservation
-is required in this pipeline. Local layers use T=2..10 by default; global rotations require T=0.
+is required in this pipeline. `layer_settings` selects each type's horizon, constraints, and builder.
 
 ## Notation
 
@@ -204,6 +204,23 @@ A global rotation addresses all atoms. Every earlier operation must complete
 before it, and every later operation waits until it completes. It occupies a
 separate layer. Within a local layer, candidates address distinct atoms.
 
+The candidate type is chosen before the K/T search. Ready local rotations have
+strict priority over ready CZ gates, including independent CZ gates appearing
+earlier in the input. If any local operation is ready, $\mathcal A_\ell$ contains
+the ready local operations; otherwise it contains ready CZ operations. A ready
+global rotation is the sole candidate. Skipped operations still prevent their
+successors from advancing on shared atoms.
+
+| Layer type | Default T range | Additional constraints | Selection |
+| --- | --- | --- | --- |
+| local | 2..10 | Crosstalk isolation | Isolation predicates |
+| rydberg | 2..10 | CZ interaction and blockade distances | `chosen` per operation |
+| global | 0 | None | One rotation |
+
+`layer_settings` associates each type with its horizon, constraint names, and
+builder function. `LAYER_PRIORITY` lists the order of ready nonglobal types.
+The common transport model and K/T search are shared across these types.
+
 ## Local rotations and crosstalk
 
 At a gate-execution endpoint, use Manhattan distance:
@@ -234,6 +251,41 @@ a pseudo-Boolean cardinality constraint is used. After SAT, execute K admissible
 operations and retain every other operation in input order. No explicit `chosen`
 variables are needed for local layers: candidates already address distinct atoms,
 and local eligibility depends only on their endpoint isolation predicates.
+
+## CZ interactions and global Rydberg illumination
+
+CZ candidates have disjoint atom pairs $e_g=A_g$. With Boolean indicators $z_g$,
+select exactly K operations:
+
+$$
+\sum_{g\in\mathcal A_\ell}z_g=K.
+$$
+
+An atom participates in at most one selected operation:
+
+$$
+\sum_{\{g\in\mathcal A_\ell:i\in A_g\}}z_g\le1.
+$$
+
+The dependency frontier already provides disjoint candidates. For the selected
+physical pair set $E^*=\{e_g:z_g=1\}$, require
+
+$$
+\{i,j\}\in E^*\Rightarrow d_{ij}(T)\le r_{\mathrm{int}}.
+$$
+
+$$
+\{i,j\}\notin E^*\Rightarrow d_{ij}(T)\ge r_{\mathrm{block}}.
+$$
+
+The intended interaction bound ensures close CZ partners. The isolation bound
+applies to every other pair, including spectators, because the Rydberg pulse
+illuminates the entire array. The example uses $r_{\mathrm{int}}=1$ and
+$r_{\mathrm{block}}=3$. Repeated CZ occurrences remain separate operations and
+cannot share a layer; physical pair sets are used only for distance constraints.
+
+CZ-distance constraints apply only to Rydberg layers; crosstalk isolation applies
+only to local layers. Global rotations apply neither distance rule.
 
 ## State continuity and global rotations
 
@@ -296,6 +348,9 @@ range, it tries a different subset of smaller size. UNKNOWN is reported as a
 solver failure; it is not treated as UNSAT. The search optimizes each layer's
 priority within the horizon range, without globally optimizing the full schedule
 or individual atom movements.
+
+If the local search is UNSAT for every K/T, compilation stops with a diagnostic.
+It does not switch to a CZ layer to change the geometry.
 
 ## Scope and output
 

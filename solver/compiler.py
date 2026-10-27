@@ -1,4 +1,4 @@
-"""Schedule single-qubit rotations with continuous AOD state."""
+"""Schedule local, global, and CZ gate layers with continuous AOD state."""
 
 import argparse
 import json
@@ -22,6 +22,9 @@ if __package__:
         add_uncaptured_atom_wait,
         add_vertex_conflicts,
         local_gate_isolation,
+        add_interaction_distance,
+        add_blockade_distance,
+        add_selected_pair_count,
     )
 else:
     from constraints import (
@@ -38,6 +41,9 @@ else:
         add_uncaptured_atom_wait,
         add_vertex_conflicts,
         local_gate_isolation,
+        add_interaction_distance,
+        add_blockade_distance,
+        add_selected_pair_count,
     )
 # Example architecture and program
 # ========================================================================
@@ -49,16 +55,22 @@ DEFAULT_ARCHITECTURE = {
     "rows": 4,
     "columns": 4,
     "r_crosstalk": 2,
+    "r_int": 1,
+    "r_block": 3,
 }
 DEFAULT_GATES = [
     (0, ("rx", pi / 2)),
     (3, ("rz", pi / 4)),
-    (0, ("rz", -pi / 2)),
+    (0, 2),
+    (1, 3),
+    (0, ("rx", -pi / 2)),
+    (1, ("rz", pi / 4)),
     ("global", ("ry", pi / 2)),
-    (1, ("rx", pi / 4)),
-    (4, ("rz", -pi / 2)),
+    (0, 4),
+    (1, 2),
+    (0, ("rz", pi / 2)),
+    (1, ("rx", pi / 2)),
     ("global", ("ry", pi)),
-    ("global", ("ry", pi / 4)),
 ]
 DEFAULT_CONSTRAINTS = {
     "atom_bounds": True,
@@ -73,58 +85,87 @@ DEFAULT_CONSTRAINTS = {
     "vertex_conflicts": True,
     "swap_conflicts": True,
     "trap_support": True,
-    "interaction_distance": False,
-    "blockade_distance": False,
+    "interaction_distance": True,
+    "blockade_distance": True,
     "crosstalk_distance": True,
     "preserve_gate_order": True,
 }
+LAYER_PRIORITY = ("local", "rydberg")
 
 
 # Operation indexing and candidate selection
 # ========================================================================
 def index_gate_operations(gate_seq, atom_count):
-    """Retain each gate occurrence; keep its axis and angle as operation metadata."""
+    """Index CZ, local, and global gates, retaining every occurrence and its ID."""
+
+    def valid_atom(atom):
+        return (
+            isinstance(atom, int)
+            and (not isinstance(atom, bool))
+            and (0 <= atom < atom_count)
+        )
+
     operations = []
     for operation_id, gate in enumerate(gate_seq):
         if not isinstance(gate, (tuple, list)) or len(gate) != 2:
             raise ValueError(
-                f"Operation {operation_id}: expected (atom, (axis, angle))."
+                f"Operation {operation_id}: expected CZ (i, j) or (atom, (axis, angle))."
             )
-        target, rotation = gate
-        if target != "global" and (
-            not isinstance(target, int)
-            or isinstance(target, bool)
-            or (not 0 <= target < atom_count)
-        ):
-            raise ValueError(f"Operation {operation_id}: invalid atom {target}.")
-        if (
-            not isinstance(rotation, (tuple, list))
-            or len(rotation) != 2
-            or rotation[0] not in ("rx", "ry", "rz")
-        ):
-            raise ValueError(
-                f"Operation {operation_id}: expected rx, ry, or rz and an angle."
-            )
-        operations.append((operation_id, (target, tuple(rotation))))
+        target, payload = gate
+        if isinstance(payload, int) and (not isinstance(payload, bool)):
+            if not valid_atom(target) or not valid_atom(payload) or target == payload:
+                raise ValueError(f"Operation {operation_id}: invalid CZ pair {gate}.")
+            layer_type = "rydberg"
+            targets = tuple(sorted((target, payload)))
+            canonical_gate = targets
+        else:
+            if (
+                not isinstance(payload, (tuple, list))
+                or len(payload) != 2
+                or payload[0] not in ("rx", "ry", "rz")
+            ):
+                raise ValueError(
+                    f"Operation {operation_id}: expected rx, ry, or rz and an angle."
+                )
+            if target == "global":
+                layer_type, targets = ("global", tuple(range(atom_count)))
+            elif valid_atom(target):
+                layer_type, targets = ("local", (target,))
+            else:
+                raise ValueError(f"Operation {operation_id}: invalid atom {target}.")
+            canonical_gate = (target, tuple(payload))
+        operations.append(
+            {
+                "id": operation_id,
+                "type": layer_type,
+                "targets": targets,
+                "gate": canonical_gate,
+            }
+        )
     return operations
 
 
 def get_layer_candidates(remaining_operations):
-    """Select the first pending operation per atom before the next global rotation."""
+    """Find ready operations across all types, giving local rotations strict priority."""
     if not remaining_operations:
-        return []
-    if remaining_operations[0][1][0] == "global":
-        return remaining_operations[:1]
-    candidates = []
+        return (None, [])
+    if remaining_operations[0]["type"] == "global":
+        return ("global", remaining_operations[:1])
+    ready = []
     encountered_atoms = set()
     for operation in remaining_operations:
-        _, (target, rotation) = operation
-        if target == "global":
+        if operation["type"] == "global":
             break
-        if target not in encountered_atoms:
-            candidates.append(operation)
-            encountered_atoms.add(target)
-    return candidates
+        if encountered_atoms.isdisjoint(operation["targets"]):
+            ready.append(operation)
+        encountered_atoms.update(operation["targets"])
+    for layer_type in LAYER_PRIORITY:
+        candidates = [
+            operation for operation in ready if operation["type"] == layer_type
+        ]
+        if candidates:
+            return (layer_type, candidates)
+    raise ValueError("No layer type is configured for the ready operations.")
 
 
 # Compilation pipeline
@@ -141,30 +182,14 @@ def compile_schedule(
     r_crosstalk = config["r_crosstalk"]
     use_constraints = {**DEFAULT_CONSTRAINTS, **(use_constraints or {})}
     layer_overrides = layer_settings or {}
-    # Layer settings
-    # ========================================================================
-    layer_settings = {
-        "local": {"min_steps": 2, "max_steps": 10},
-        "global": {"min_steps": 0, "max_steps": 0},
-    }
-    for kind, options in layer_overrides.items():
-        layer_settings[kind].update(options)
-    MIN_STEPS, MAX_STEPS = (
-        layer_settings["local"]["min_steps"],
-        layer_settings["local"]["max_steps"],
-    )
-    if (
-        layer_settings["global"]["min_steps"],
-        layer_settings["global"]["max_steps"],
-    ) != (0, 0):
-        raise ValueError("Global rotations require T=0.")
+    r_int, r_block = (config["r_int"], config["r_block"])
 
     # Shared transport constraints
     # ========================================================================
     def add_transport_constraints(
         s, atom_x, atom_y, r, c, current_starts, initial_rows, initial_cols
     ):
-        """Apply shared transport constraints without CZ distance constraints."""
+        """Apply the same transport and trap-support constraints to every layer type."""
         if use_constraints["atom_bounds"]:
             add_atom_bounds(s, atom_x, atom_y, W, H)
         if use_constraints["active_line_bounds"]:
@@ -191,7 +216,7 @@ def compile_schedule(
             add_trap_support(s, atom_x, atom_y, r, c, slm_sites)
 
     def validate_initial_state(current_starts, initial_rows, initial_cols):
-        """Validate the initial state, including empty programs and initial global rotations."""
+        """Validate initial transport state without interaction constraints."""
         atom_x = [[IntVal(x)] for x, y in current_starts]
         atom_y = [[IntVal(y)] for x, y in current_starts]
         r = [
@@ -215,16 +240,78 @@ def compile_schedule(
             detail = s.reason_unknown() if result == unknown else "UNSAT"
             raise ValueError(f"Invalid initial state: {detail}.")
 
+    # Layer-specific constraints
+    # ========================================================================
+    def add_local_layer_constraints(
+        s, atom_x, atom_y, candidates, count, enabled, layer_index
+    ):
+        targets = {operation["id"]: operation["targets"][0] for operation in candidates}
+        isolated = (
+            local_gate_isolation(atom_x, atom_y, targets, r_crosstalk)
+            if "crosstalk_distance" in enabled
+            else {operation_id: BoolVal(True) for operation_id in targets}
+        )
+        if count == len(candidates):
+            s.add(*isolated.values())
+        else:
+            s.add(PbGe([(condition, 1) for condition in isolated.values()], count))
+        return isolated
+
+    def add_rydberg_layer_constraints(
+        s, atom_x, atom_y, candidates, count, enabled, layer_index
+    ):
+        chosen = {
+            operation["id"]: Bool(f"M{layer_index}_g{operation['id']}_chosen")
+            for operation in candidates
+        }
+        add_selected_pair_count(s, chosen, count)
+        chosen_by_pair = {
+            operation["gate"]: chosen[operation["id"]] for operation in candidates
+        }
+        pairs = set(chosen_by_pair)
+        if "interaction_distance" in enabled:
+            add_interaction_distance(s, atom_x, atom_y, pairs, r_int, chosen_by_pair)
+        if "blockade_distance" in enabled:
+            add_blockade_distance(s, atom_x, atom_y, pairs, r_block, chosen_by_pair)
+        return chosen
+
+    # Layer settings
+    # ========================================================================
+    layer_settings = {
+        "local": {
+            "min_steps": 2,
+            "max_steps": 10,
+            "constraints": ("crosstalk_distance",),
+            "build_constraints": add_local_layer_constraints,
+        },
+        "rydberg": {
+            "min_steps": 2,
+            "max_steps": 10,
+            "constraints": ("interaction_distance", "blockade_distance"),
+            "build_constraints": add_rydberg_layer_constraints,
+        },
+        "global": {
+            "min_steps": 0,
+            "max_steps": 0,
+            "constraints": (),
+            "build_constraints": None,
+        },
+    }
+    for kind, options in layer_overrides.items():
+        layer_settings[kind].update(options)
+
     # Single-layer solver
     # ========================================================================
     def solve_next_layer(
         current_starts, remaining_operations, initial_rows, initial_cols, layer_index
     ):
-        candidates = get_layer_candidates(remaining_operations)
+        layer_type, candidates = get_layer_candidates(remaining_operations)
         if not candidates:
             return None
-        if candidates[0][1][0] == "global":
+        settings = layer_settings[layer_type]
+        if layer_type == "global":
             return (
+                layer_type,
                 0,
                 candidates,
                 remaining_operations[1:],
@@ -232,23 +319,26 @@ def compile_schedule(
                 [list(initial_rows)],
                 [list(initial_cols)],
             )
+        enabled = {name for name in settings["constraints"] if use_constraints[name]}
         atom_count = len(current_starts)
-        print(f"Layer {layer_index}: local candidates (ID, gate): {candidates}")
-        for gate_count in range(len(candidates), 0, -1):
-            for T in range(MIN_STEPS, MAX_STEPS + 1):
+        print(
+            f"Layer {layer_index} ({layer_type}): candidates {[op['id'] for op in candidates]}"
+        )
+        for count in range(len(candidates), 0, -1):
+            for T in range(settings["min_steps"], settings["max_steps"] + 1):
                 atom_x = [
-                    [Int(f"SQ{layer_index}_a{i}_x_{t}") for t in range(T + 1)]
+                    [Int(f"M{layer_index}_a{i}_x_{t}") for t in range(T + 1)]
                     for i in range(atom_count)
                 ]
                 atom_y = [
-                    [Int(f"SQ{layer_index}_a{i}_y_{t}") for t in range(T + 1)]
+                    [Int(f"M{layer_index}_a{i}_y_{t}") for t in range(T + 1)]
                     for i in range(atom_count)
                 ]
                 r = [
                     [
                         (
-                            Int(f"SQ{layer_index}_r_{j}_{t}"),
-                            Bool(f"SQ{layer_index}_r_{j}_{t}_on"),
+                            Int(f"M{layer_index}_r_{j}_{t}"),
+                            Bool(f"M{layer_index}_r_{j}_{t}_on"),
                         )
                         for j in range(r_max)
                     ]
@@ -257,8 +347,8 @@ def compile_schedule(
                 c = [
                     [
                         (
-                            Int(f"SQ{layer_index}_c_{j}_{t}"),
-                            Bool(f"SQ{layer_index}_c_{j}_{t}_on"),
+                            Int(f"M{layer_index}_c_{j}_{t}"),
+                            Bool(f"M{layer_index}_c_{j}_{t}_on"),
                         )
                         for j in range(c_max)
                     ]
@@ -268,46 +358,32 @@ def compile_schedule(
                 add_transport_constraints(
                     s, atom_x, atom_y, r, c, current_starts, initial_rows, initial_cols
                 )
-                targets = {
-                    operation_id: target
-                    for operation_id, (target, rotation) in candidates
-                }
-                isolated = (
-                    local_gate_isolation(atom_x, atom_y, targets, r_crosstalk)
-                    if use_constraints["crosstalk_distance"]
-                    else {operation_id: BoolVal(True) for operation_id in targets}
+                selection = settings["build_constraints"](
+                    s, atom_x, atom_y, candidates, count, enabled, layer_index
                 )
-                if gate_count == len(candidates):
-                    s.add(*isolated.values())
-                else:
-                    s.add(
-                        PbGe(
-                            [(condition, 1) for condition in isolated.values()],
-                            gate_count,
-                        )
-                    )
                 result = s.check()
                 if result == unsat:
-                    print(f"Layer {layer_index}, K={gate_count}, T={T}: UNSAT")
+                    print(
+                        f"Layer {layer_index} ({layer_type}), K={count}, T={T}: UNSAT"
+                    )
                     continue
                 if result == unknown:
                     raise RuntimeError(
-                        f"Layer {layer_index}, K={gate_count}, T={T}: UNKNOWN ({s.reason_unknown()})"
+                        f"Layer {layer_index} ({layer_type}), K={count}, T={T}: UNKNOWN ({s.reason_unknown()})"
                     )
                 model = s.model()
-                admissible = [
+                selected = [
                     operation
                     for operation in candidates
                     if is_true(
-                        model.eval(isolated[operation[0]], model_completion=True)
+                        model.eval(selection[operation["id"]], model_completion=True)
                     )
-                ]
-                selected = admissible[:gate_count]
-                selected_ids = {operation_id for operation_id, gate in selected}
+                ][:count]
+                selected_ids = {operation["id"] for operation in selected}
                 deferred = [
                     operation
                     for operation in remaining_operations
-                    if operation[0] not in selected_ids
+                    if operation["id"] not in selected_ids
                 ]
                 paths = [
                     [
@@ -334,7 +410,15 @@ def compile_schedule(
 
                 row_states = [read_line_state(r, t) for t in range(T + 1)]
                 col_states = [read_line_state(c, t) for t in range(T + 1)]
-                return (T, selected, deferred, paths, row_states, col_states)
+                return (
+                    layer_type,
+                    T,
+                    selected,
+                    deferred,
+                    paths,
+                    row_states,
+                    col_states,
+                )
         return None
 
     # Successive layers with continuous AOD state
@@ -342,11 +426,21 @@ def compile_schedule(
     if not starts:
         raise ValueError("At least one atom is required.")
     if not use_constraints["preserve_gate_order"]:
-        raise ValueError("This single-qubit pipeline preserves gate order.")
-    if use_constraints["interaction_distance"] or use_constraints["blockade_distance"]:
-        raise ValueError("CZ distance constraints do not apply to single-qubit layers.")
-    if not 0 <= MIN_STEPS <= MAX_STEPS or r_crosstalk < 0:
-        raise ValueError("Require 0 <= min_steps <= max_steps and r_crosstalk >= 0.")
+        raise ValueError("The mixed pipeline preserves gate order on each atom.")
+    if not 0 <= r_int < r_block or r_crosstalk < 0:
+        raise ValueError("Require 0 <= r_int < r_block and r_crosstalk >= 0.")
+    for settings in layer_settings.values():
+        if not 0 <= settings["min_steps"] <= settings["max_steps"]:
+            raise ValueError(
+                "Require 0 <= min_steps <= max_steps for every layer type."
+            )
+    if (
+        layer_settings["global"]["min_steps"],
+        layer_settings["global"]["max_steps"],
+    ) != (0, 0):
+        raise ValueError(
+            "Global rotations require no transport: their T range must be 0..0."
+        )
     pipeline_start = time.time()
     current_starts = list(starts)
     remaining_operations = index_gate_operations(gate_seq, len(starts))
@@ -369,11 +463,12 @@ def compile_schedule(
             layer_index,
         )
         if layer is None:
+            layer_type, candidates = get_layer_candidates(remaining_operations)
+            settings = layer_settings[layer_type]
             raise RuntimeError(
-                f"Could not schedule local candidates within T={MIN_STEPS}..{MAX_STEPS}; remaining operations (ID, gate): {remaining_operations}"
+                f"Layer {layer_index} ({layer_type}): UNSAT for all K and T={settings['min_steps']}..{settings['max_steps']}; candidates {[op['id'] for op in candidates]}. Automatic fallback to another layer type is disabled."
             )
-        T, selected, deferred, paths, row_states, col_states = layer
-        layer_type = "global" if selected[0][1][0] == "global" else "local"
+        layer_type, T, selected, deferred, paths, row_states, col_states = layer
         for i, path in enumerate(paths):
             all_paths[i].extend(path[1:])
         all_rows.extend(
@@ -383,7 +478,8 @@ def compile_schedule(
             [[position for position, on in state if on] for state in col_states[1:]]
         )
         total_steps += T
-        selected_ids = [operation_id for operation_id, gate in selected]
+        selected_ids = [operation["id"] for operation in selected]
+        selected_gates = [operation["gate"] for operation in selected]
         gate_layers.append(
             {
                 "layer": layer_index,
@@ -391,7 +487,7 @@ def compile_schedule(
                 "step": total_steps,
                 "transport_steps": T,
                 "operation_ids": selected_ids,
-                "gates": [gate for operation_id, gate in selected],
+                "gates": selected_gates,
             }
         )
         operation_layers.append((total_steps, selected_ids))
@@ -400,14 +496,13 @@ def compile_schedule(
         initial_cols = col_states[-1]
         remaining_operations = deferred
         print(
-            f"Layer {layer_index} ({layer_type}): T={T}, executed operations (ID, gate): {selected}"
+            f"Layer {layer_index} ({layer_type}): T={T}, executed {list(zip(selected_ids, selected_gates))}"
         )
-        print(f"Deferred operations (ID, gate): {deferred}")
     print(
-        f"All single-qubit gates completed. Layers: {len(gate_layers)}; transport steps: {total_steps}."
+        f"All gates completed. Layers: {len(gate_layers)}; transport steps: {total_steps}."
     )
-    print(f"Single-qubit layers: {gate_layers}")
-    print(f"Execution time: {round(time.time() - pipeline_start)} s")
+    print(f"Layer types: {[event['type'] for event in gate_layers]}")
+    print(f"Execution time: {time.time() - pipeline_start:.2f} s")
     return {
         "architecture": config,
         "paths": all_paths,
@@ -443,8 +538,8 @@ def main(animate=False, output_dir=None):
             columns=result["columns"],
             gate_layers=result["layers"],
             fps=2,
-            output_path=destination / "single_qubit_layers.mp4",
-            preview_path=destination / "single_qubit_layers.png",
+            output_path=destination / "mixed_gate_layers.mp4",
+            preview_path=destination / "mixed_gate_layers.png",
         )
     return result
 

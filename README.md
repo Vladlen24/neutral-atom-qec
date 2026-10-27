@@ -4,7 +4,7 @@ An SMT-based compiler for atom transport and gate-layer scheduling on
 reconfigurable neutral-atom arrays. The implementation is developed
 independently using [Z3](https://github.com/Z3Prover/z3).
 
-The compiler schedules local and global single-qubit rotations with preserved operation order.
+The compiler schedules local and global single-qubit rotations and CZ layers. Local rotations have strict priority among ready operations.
 AOD rows and columns transport atoms between fixed SLM trapping sites.
 For each layer, the search prioritizes the number of parallel gates, then
 the transport horizon. Repeated gates retain separate operation IDs.
@@ -21,7 +21,7 @@ python3 solver/compiler.py --json solver/output/schedule.json
 MP4 export requires `ffmpeg`. `--animate` saves a video and PNG preview to
 `solver/output/`; `--output-dir` selects another destination.
 The example in `DEFAULT_GATES` uses local `rx(theta)` and `rz(theta)` rotations
-and global `ry(theta)` rotations.
+and global `ry(theta)` rotations, together with CZ gates.
 
 Programs can also be compiled directly:
 
@@ -53,15 +53,18 @@ assumptions, and scheduling priority.
 
 ## Demonstration
 
-[![Gate-layer scheduling](solver/media/single_qubit_layers.png)](solver/media/single_qubit_layers.mp4)
+[![Gate-layer scheduling](solver/media/mixed_gate_layers.png)](solver/media/mixed_gate_layers.mp4)
 
 Green outlines indicate SLM sites; dashed red lines indicate active AOD lines.
 Blue cells highlight atoms addressed by local rotations; a green field indicates
-a global rotation.
+a global rotation; an orange field indicates a global Rydberg pulse.
 Execution frames are separate from transport steps, so consecutive global
 rotations remain visible without adding transport duration.
 
 Compilation examples are collected in [`solver/media/`](solver/media/).
+The [single-qubit example](solver/media/single_qubit_layers.mp4) and its
+[preview](solver/media/single_qubit_layers.png) accompany the version in
+[`1q_layer`](https://github.com/Vladlen24/neutral-atom-qec/tree/1q_layer).
 
 ## Tests
 
