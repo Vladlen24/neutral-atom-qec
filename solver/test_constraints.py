@@ -185,5 +185,30 @@ class LayerStateExamples(unittest.TestCase):
         self.assertEqual(solver.check(), unsat)
 
 
+class LocalAddressingExamples(unittest.TestCase):
+    def test_isolation_boundary_and_close_spectators(self):
+        xs, ys = atom_coordinates([(0, 0)], [(2, 0)], [(2, 1)])
+        condition = constraints.local_gate_isolation(xs, ys, {7: 0}, 2)[7]
+        solver = Solver()
+        solver.add(condition)
+        self.assertEqual(solver.check(), sat)
+        solver.add(Not(condition))
+        self.assertEqual(solver.check(), unsat)
+
+    def test_addressed_atom_must_avoid_every_other_atom(self):
+        xs, ys = atom_coordinates([(0, 0)], [(1, 0)], [(4, 0)])
+        condition = constraints.local_gate_isolation(xs, ys, {0: 0}, 2)[0]
+        solver = Solver()
+        solver.add(condition)
+        self.assertEqual(solver.check(), unsat)
+
+    def test_single_atom_has_no_crosstalk_neighbours(self):
+        xs, ys = atom_coordinates([(0, 0)])
+        condition = constraints.local_gate_isolation(xs, ys, {0: 0}, 2)[0]
+        solver = Solver()
+        solver.add(condition)
+        self.assertEqual(solver.check(), sat)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,37 +1,34 @@
 # SMT compiler model
 
-The compiler schedules CZ operations between neutral atoms on a discrete grid.
-Repeated operations on the same atom pair retain separate identities.
-AOD rows and columns transport atoms;
-fixed SLM sites provide stationary trapping locations. Each CZ layer ends
-with a global Rydberg pulse.
+The compiler schedules local and global single-qubit rotations with preserved operation order.
+All layers share the AOD transport and trap-support model below.
+Input rotations use `(atom, ('rx'/'ry'/'rz', angle))` or
+`('global', ('rx'/'ry'/'rz', angle))`.
+Axes and angles are operation metadata; quantum-state evolution is not simulated.
 
-The constraint functions are implemented in [`constraints.py`](constraints.py).
-All groups are enabled in the supplied example. The `use_constraints`
-dictionary in [`compiler.py`](compiler.py) supports experiments with individual
-groups disabled.
+The `use_constraints` dictionary enables constraint groups. Order preservation
+is required in this pipeline. Local layers use T=2..10 by default; global rotations require T=0.
 
 ## Notation
 
-Within one layer, states are indexed by $t=0,\ldots,T$ and atoms by $i$.
-The constraints apply to all valid atom, line, and time indices unless stated
-otherwise.
+Within a layer, states are indexed by $t=0,\ldots,T$ and atoms by $i$.
+The formulas apply to all valid indices unless stated otherwise.
 
 | Symbol | Meaning |
 | --- | --- |
-| $p_i^t=(x_i^t,y_i^t)$ | Integer position of atom $i$ |
+| $p_i^t=(x_i^t,y_i^t)$ | Integer atom position |
 | $W,H$ | Grid width and height |
 | $s_i$ | Initial atom position in the layer |
-| $R_j^t,\rho_j^t$ | Enabled state and vertical coordinate of AOD row $j$ |
-| $C_k^t,\gamma_k^t$ | Enabled state and horizontal coordinate of AOD column $k$ |
-| $\mathcal{S}$ | Fixed SLM site set |
-| $E$ | Remaining operation IDs, in their original input order |
-| $e_g=\{i,j\}$ | Unordered atom pair for operation $g$ |
-| $\mathcal{A}$ | Operation IDs eligible for the current layer |
-| $z_g$ | Boolean operation-selection indicator, written as 0 or 1 in sums |
-| $r_{\mathrm{int}},r_{\mathrm{block}}$ | Interaction and isolation thresholds |
+| $R_j^t,\rho_j^t$ | Enabled state and coordinate of AOD row $j$ |
+| $C_k^t,\gamma_k^t$ | Enabled state and coordinate of AOD column $k$ |
+| $\mathcal S$ | Fixed SLM site set |
+| $E_\ell$ | Pending operation IDs in input order |
+| $A_g$ | Atoms addressed by operation $g$; all atoms for a global rotation |
+| $\mathcal A_\ell$ | Candidate IDs for the selected layer type |
+| $L(g)$ | Execution-layer index of operation $g$ |
+| $r_{\mathrm{crosstalk}}$ | Local-addressing isolation threshold |
 
-## Constraints
+## Shared transport constraints
 
 ### 1. Atom bounds and initial positions
 
@@ -59,7 +56,7 @@ C_k^t\Rightarrow 0\le\gamma_k^t<W.
 $$
 
 All lines start disabled before the first layer. Later layers inherit their
-states as specified in constraint 11.
+states as specified in the state-continuity constraint.
 
 $$
 R_j^0=0,\qquad C_k^0=0.
@@ -182,167 +179,141 @@ $$
 These constraints cover sampled positions and direct swaps. They do not
 resolve all possible collisions along continuous trajectories between states.
 
-### 9. Intended interactions and isolation
+## Operation order and candidate selection
 
-At a layer's Rydberg pulse, use the discrete Manhattan distance
+Repeated occurrences have distinct original input IDs. Operations sharing an
+atom retain their input order:
+
+$$
+h<g,\quad A_h\cap A_g\ne\varnothing\Rightarrow L(h)<L(g).
+$$
+
+For each pending operation, define its unexecuted predecessors:
+
+$$
+D_\ell(g)=\{h\in E_\ell:h<g,\ A_h\cap A_g\ne\varnothing\}.
+$$
+
+The ready set is
+
+$$
+\mathcal F_\ell=\{g\in E_\ell:D_\ell(g)=\varnothing\}.
+$$
+
+A global rotation addresses all atoms. Every earlier operation must complete
+before it, and every later operation waits until it completes. It occupies a
+separate layer. Within a local layer, candidates address distinct atoms.
+
+## Local rotations and crosstalk
+
+At a gate-execution endpoint, use Manhattan distance:
 
 $$
 d_{ij}(T)=|x_i^T-x_j^T|+|y_i^T-y_j^T|.
 $$
 
-For the selected physical CZ-pair set
-$E^*=\{e_g:g\in\mathcal{A},\ z_g=1\}$, require
+For a local candidate $g$ addressing atom $i_g$, define
 
 $$
-\{i,j\}\in E^*\Rightarrow d_{ij}(T)\le r_{\mathrm{int}}.
+C_g(T)=\bigwedge_{j\ne i_g}[d_{i_gj}(T)\ge r_{\mathrm{crosstalk}}].
 $$
 
-$$
-\{i,j\}\notin E^*\Rightarrow d_{ij}(T)\ge r_{\mathrm{block}}.
-$$
+This isolates the addressed atom from every other atom, including targets of
+other simultaneous local rotations. Two unaddressed spectators need not be
+separated by this threshold. The condition applies when the local gates execute,
+not during transport. The supplied example uses $r_{\mathrm{crosstalk}}=2$.
 
-The first threshold enforces sufficiently close intended CZ partners. The
-second isolates every other pair, including two spectators, because the pulse
-illuminates all atoms. For $r_{\mathrm{int}}<r_{\mathrm{block}}$, distances
-between these thresholds are unsuitable for either case.
-
-The bounds apply at pulse boundaries, not during pulse-free transport.
-Manhattan distance is a model approximation even with diagonal motion enabled;
-the radii are not calibrated physical lengths. The example uses
-$r_{\mathrm{int}}=1$ and $r_{\mathrm{block}}=3$.
-
-### 10. CZ-pair selection
-
-For a trial layer size $K$, select exactly $K$ eligible operations:
+For a trial layer size K, require at least K admissible candidates:
 
 $$
-\sum_{g\in\mathcal{A}}z_g=K.
+\sum_{g\in\mathcal A_\ell}\mathbf 1[C_g(T)]\ge K.
 $$
 
-An atom participates in at most one selected operation. For its incident
-operation set $\mathcal{A}_i=\{g\in\mathcal{A}:i\in e_g\}$:
+When all candidates are requested, each $C_g(T)$ is asserted directly. Otherwise
+a pseudo-Boolean cardinality constraint is used. After SAT, execute K admissible
+operations and retain every other operation in input order. No explicit `chosen`
+variables are needed for local layers: candidates already address distinct atoms,
+and local eligibility depends only on their endpoint isolation predicates.
+
+## State continuity and global rotations
+
+Each layer starts from the preceding layer's final atom and AOD state:
 
 $$
-\sum_{g\in\mathcal{A}_i}z_g\le1.
-$$
-
-This creates a layer of disjoint CZ gates, so repeated operations on the same
-pair require separate pulses. For geometry, a physical pair is selected when
-at least one of its operation indicators is true. An unselected occurrence
-therefore does not impose isolation on a pair selected by another occurrence.
-
-### 11. State continuity between layers
-
-The next layer starts from the preceding layer's final atom and AOD states:
-
-$$
-p_{i,\ell+1}^{0}=p_{i,\ell}^{T_\ell}.
+p_{i,\ell+1}^0=p_{i,\ell}^{T_\ell}.
 $$
 
 $$
-R_{j,\ell+1}^{0}=R_{j,\ell}^{T_\ell},\qquad
-C_{k,\ell+1}^{0}=C_{k,\ell}^{T_\ell}.
+R_{j,\ell+1}^0=R_{j,\ell}^{T_\ell},\qquad C_{k,\ell+1}^0=C_{k,\ell}^{T_\ell}.
 $$
 
-For enabled lines, their coordinates also carry over:
+Coordinates of enabled lines also carry over:
 
 $$
-R_{j,\ell}^{T_\ell}\Rightarrow\rho_{j,\ell+1}^{0}=\rho_{j,\ell}^{T_\ell}.
+R_{j,\ell}^{T_\ell}\Rightarrow\rho_{j,\ell+1}^0=\rho_{j,\ell}^{T_\ell}.
 $$
 
 $$
-C_{k,\ell}^{T_\ell}\Rightarrow\gamma_{k,\ell+1}^{0}=\gamma_{k,\ell}^{T_\ell}.
+C_{k,\ell}^{T_\ell}\Rightarrow\gamma_{k,\ell+1}^0=\gamma_{k,\ell}^{T_\ell}.
 $$
 
-Line identities persist; inactive coordinates remain unconstrained. With
-$G_\ell^*=\{g\in\mathcal{A}_\ell:z_g=1\}$, only executed operation IDs are removed.
-The remaining IDs retain their input order:
+Line identities persist. A global rotation keeps all these states unchanged,
+requires no transport search, and has $T_\ell=0$. The initial state is validated
+even for an empty program or an initial global rotation.
+
+Only executed operation IDs $G_\ell^*$ are removed:
 
 $$
 E_{\ell+1}=E_\ell\setminus G_\ell^*.
 $$
 
-The boundary state is shared, so it adds no extra transition:
+Pending IDs retain their input order. Adjacent layers share their boundary frame,
+and the total number of transport transitions is
 
 $$
 T_{\mathrm{total}}=\sum_\ell T_\ell.
 $$
 
-The horizon counts logical transitions. Rydberg pulses mark layer endpoints;
-a separately calibrated gate duration is not included in this count.
-
-### 12. Gate order on each atom
-
-With `use_constraints['preserve_gate_order']=True`, operations sharing an atom
-execute in their input order. For original input indices $h<g$ and execution
-layer $L(g)$:
-
-$$
-e_h\cap e_g\ne\varnothing\Rightarrow L(h)<L(g).
-$$
-
-Before searching over $K$ and $T$, find each pending operation's predecessors:
-
-$$
-D_\ell(g)=\{h\in E_\ell:h<g,\ e_h\cap e_g\ne\varnothing\}.
-$$
-
-Only operations without pending predecessors are candidates:
-
-$$
-\mathcal{A}_\ell=\{g\in E_\ell:D_\ell(g)=\varnothing\}.
-$$
-
-This enforces order by candidate filtering rather than additional SMT variables.
-Disjoint ready operations can share a layer. A deferred operation continues to
-block its successors, even if it was itself blocked in the current layer.
-After a layer, recompute candidates from the remaining ordered operations.
-
-With `preserve_gate_order=False`, $\mathcal{A}_\ell=E_\ell$: all remaining
-operations are candidates. Repeated pairs remain distinct operations in both
-modes; they are never deduplicated or cancelled.
+Gate events retain separate layer indices even when they share a transport step.
+Their physical durations are not yet included in this transport count.
 
 ## Scheduling priority
 
-Let $F(K,T)$ mean that the hard constraints are satisfiable for layer size $K$
-and horizon $T$. With $\mathcal{T}=\{T_{\min},\ldots,T_{\max}\}$, the search is
+Let $F(K,T)$ mean the selected layer type is feasible, and let $\mathcal T$ be
+its configured horizon range. The search implements
 
 $$
-K^*=\max\{K\ge1:\exists T\in\mathcal{T},\ F(K,T)\}.
+K^*=\max\{K\ge1:\exists T\in\mathcal T,\ F(K,T)\}.
 $$
 
 $$
-T^*=\min\{T\in\mathcal{T}:F(K^*,T)\}.
+T^*=\min\{T\in\mathcal T:F(K^*,T)\}.
 $$
 
-The number of parallel CZ gates has priority over transport duration. The
-solver tries $K$ in descending order and $T$ in ascending order, accepting the
-first satisfying model. If a trial cardinality is infeasible over the entire
-horizon range, it decreases $K$ and allows a new choice of pairs.
+The compiler tries K in descending order and T in ascending order, returning
+the first satisfying model. If a cardinality is infeasible across the entire
+range, it tries a different subset of smaller size. UNKNOWN is reported as a
+solver failure; it is not treated as UNSAT. The search optimizes each layer's
+priority within the horizon range, without globally optimizing the full schedule
+or individual atom movements.
 
-The compiler uses ordinary SAT search, with no additional optimization of
-individual atom movements. It optimizes each layer's priority within the
-specified horizon range, rather than globally optimizing all future layers.
+## Scope and output
 
-## Scope
+The current model uses a single discrete array with horizontal, vertical, and
+diagonal transport. Manhattan distance is an explicit approximation when diagonal
+movement is allowed; radii are not calibrated physical lengths. Zoned geometry,
+capture dynamics, pulse durations, and hardware timing are not yet modeled.
+Rotation axes and angles are retained without simulating a quantum state.
 
-The current input is an ordered list of CZ operations, including repeated pairs.
-Order preservation constrains the schedule; it does not change the physical
-commutation properties of CZ gates. Intermediate single-qubit gates and their
-dependencies are not yet represented. Positions and time steps are
-discrete; physical capture dynamics and hardware timing require a more detailed
-model.
+`compile_schedule` returns `architecture`, `paths`, `rows`, `columns`, `layers`,
+`operation_layers`, and `total_steps`. Each layer records its type, transport
+endpoint, duration, original operation IDs, and gate parameters.
 
-## Tests
-
-Run from the repository root:
+Run checks from the repository root:
 
 ```sh
 python3 -m unittest discover -s solver -p "test_*.py"
 ```
 
-The tests cover admissible and forbidden constraint configurations, ordered
-candidate selection, repeated operation identities, carried AOD state, complete
-CZ coverage, trap support, collisions, and interaction distances throughout a
-computed schedule. Schedule JSON includes `operation_layers` with the original
-operation IDs alongside the physical pairs in `layers`.
+Tests cover gate dependencies, repeated occurrences, admissible and forbidden
+physical configurations, crosstalk, state continuity, and complete schedules.

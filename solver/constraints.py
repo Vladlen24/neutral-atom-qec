@@ -1,4 +1,4 @@
-"""SMT constraints for discrete neutral-atom transport and CZ scheduling.
+"""SMT constraints for discrete neutral-atom transport and gate scheduling.
 
 See README.md for the constraint definitions and model assumptions.
 """
@@ -180,6 +180,20 @@ def add_vertex_conflicts(s, atom_x, atom_y):
 def _final_distance(atom_x, atom_y, i, j):
     """Return the Manhattan distance between atoms i and j at the final step."""
     return Abs(atom_x[i][-1] - atom_x[j][-1]) + Abs(atom_y[i][-1] - atom_y[j][-1])
+
+
+def local_gate_isolation(atom_x, atom_y, targets, r_crosstalk):
+    """Return final-state isolation predicates for operation IDs mapped to addressed atoms."""
+    return {
+        operation_id: And(
+            *[
+                _final_distance(atom_x, atom_y, target, other) >= r_crosstalk
+                for other in range(len(atom_x))
+                if other != target
+            ]
+        )
+        for operation_id, target in targets.items()
+    }
 
 
 def add_interaction_distance(s, atom_x, atom_y, cz_set, r_int, chosen=None):
