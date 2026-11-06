@@ -50,6 +50,12 @@ of every atom. Repeated gates retain separate IDs. `routing_verified` is false:
 a placement solution does not establish that its incoming transport is feasible.
 Global rotations retain the preceding placement.
 
+### Steane placement example
+
+[![Steane placements](solver/media/Steane_placement.png)](solver/media/Steane_placement.mp4)
+
+The ten-atom example uses twelve CZ gates between data and ancilla atoms,
+arranged into four Rydberg layers between two global rotations.
 
 The video holds one snapshot per layer, without interpolating atom motion.
 Blue cells indicate local rotations, green shading indicates a global rotation,
@@ -71,6 +77,8 @@ from solver.surface_code_d3 import ARCHITECTURE, ATOM_ROLES, build_gate_seq
 schedule = compile_placement(build_gate_seq(), architecture=ARCHITECTURE)
 render_placement_snapshots(schedule, "solver/output/surface_code_d3", atom_roles=ATOM_ROLES)
 ```
+
+[![Surface-code placements](solver/media/surface_code_d3_placements.png)](solver/media/surface_code_d3_placements.mp4)
 
 Data-qubit atoms are red; ancilla atoms are blue. The example uses 40 SLM
 traps arranged in horizontal pairs and an arbitrary initial placement.
