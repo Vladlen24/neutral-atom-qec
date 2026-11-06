@@ -1,5 +1,8 @@
 # SMT compiler model
 
+This document describes the earlier transport-based `compiler.py`. For the
+`placement-routing` branch entry point, see the [SLM placement model](PLACEMENT_README.md).
+
 The compiler schedules local and global single-qubit rotations and CZ layers. Local rotations have strict priority among ready operations.
 All layers share the AOD transport and trap-support model below.
 Input rotations use `(atom, ('rx'/'ry'/'rz', angle))` or

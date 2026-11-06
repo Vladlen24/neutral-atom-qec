@@ -1,82 +1,100 @@
-# SMT compiler
+# SMT compiler: SLM placement
 
-An SMT-based compiler for atom transport and gate-layer scheduling on
-reconfigurable neutral-atom arrays. The implementation is developed
-independently using [Z3](https://github.com/Z3Prover/z3).
+This branch, `placement-routing`, separates gate-layer placement from atom
+routing. A Z3 solver assigns every atom to a distinct SLM trap at each gate
+layer. Transport paths, AOD lines, switching states, and time horizons are
+not represented in this model.
 
-The compiler schedules local and global single-qubit rotations and CZ layers. Local rotations have strict priority among ready operations.
-AOD rows and columns transport atoms between fixed SLM trapping sites.
-For each layer, the search prioritizes the number of parallel gates, then
-the transport horizon. Repeated gates retain separate operation IDs.
+The compiler is developed independently using [Z3](https://github.com/Z3Prover/z3).
+It schedules local rotations, global rotations, and CZ gates while preserving
+operation order on each atom. Ready local rotations have priority over ready
+CZ gates. Each layer maximizes the number of parallel gates; there is no
+movement-cost objective yet.
 
 ## Run
 
 ```sh
 python3 -m pip install -r solver/requirements.txt
-python3 solver/compiler.py
-python3 solver/compiler.py --animate
-python3 solver/compiler.py --json solver/output/schedule.json
+python3 solver/placement.py
+python3 solver/placement.py --animate
+python3 solver/placement.py --timeout-ms 60000
 ```
 
-MP4 export requires `ffmpeg`. `--animate` saves a video and PNG preview to
-`solver/output/`; `--output-dir` selects another destination.
-The example in `DEFAULT_GATES` uses local `rx(theta)` and `rz(theta)` rotations
-and global `ry(theta)` rotations, together with CZ gates.
-
-Programs can also be compiled directly:
+Results are written to `solver/output/placement/`. `--output-dir` selects another
+folder. MP4 export requires `ffmpeg`. A timeout applies to each solver check;
+UNKNOWN stops compilation and is not interpreted as UNSAT.
 
 ```python
-from solver.compiler import compile_schedule
+from math import pi
+from solver.placement import compile_placement, render_placement_snapshots
 
-schedule = compile_schedule([
-    (0, ('rx', 1.5707963267948966)),
-    ('global', ('ry', 1.5707963267948966)),
+schedule = compile_placement([
+    (0, ('rx', pi / 2)),
+    (0, 1),
+    ('global', ('ry', -pi / 2)),
 ])
+render_placement_snapshots(schedule)
 ```
 
-`DEFAULT_ARCHITECTURE` defines the grid, initial positions, SLM sites, AOD
-line counts, and distance thresholds. Optional `architecture`, `layer_settings`,
-and `use_constraints` dictionaries override individual settings in
-`compile_schedule`. Gate angles are specified in radians.
+An optional `architecture` dictionary overrides fields of `DEFAULT_ARCHITECTURE`:
+`width`, `height`, `slm_sites`, `starts`, `r_int`, `r_block`, and `r_crosstalk`.
+Coordinates are integer grid positions; rotation angles are in radians.
 
-## Model and implementation
+## Model and output
 
-[`solver/README.md`](solver/README.md) describes the formulas, physical
-assumptions, and scheduling priority.
+[The placement model](solver/PLACEMENT_README.md) documents the constraints,
+scheduling rules, and planned routing interface.
+
+Each output layer contains its type, operation IDs and gates, and the position
+of every atom. Repeated gates retain separate IDs. `routing_verified` is false:
+a placement solution does not establish that its incoming transport is feasible.
+Global rotations retain the preceding placement.
+
+
+The video holds one snapshot per layer, without interpolating atom motion.
+Blue cells indicate local rotations, green shading indicates a global rotation,
+and orange shading indicates a Rydberg pulse. Orange links denote CZ gates,
+not transport paths. Frame duration does not represent physical execution time.
+
+## Distance-3 surface-code example
+
+[solver/surface_code_d3.py](solver/surface_code_d3.py) defines the 17-qubit
+circuit with nine data qubits and eight ancillas. Its source is
+`build_17_qubit_surface_code_circuit` in
+[circuit.py on external_compilers](https://github.com/Vladlen24/neutral-atom-qec/blob/1c2fec30570c9060572d1015014b855dff14e2b1/circuit.py).
+Hadamard layers are lowered to global RY and local RZ rotations. The input
+contains 24 CZ gates, 44 local rotations, and eight global rotations.
+
+```python
+from solver.surface_code_d3 import ARCHITECTURE, ATOM_ROLES, build_gate_seq
+
+schedule = compile_placement(build_gate_seq(), architecture=ARCHITECTURE)
+render_placement_snapshots(schedule, "solver/output/surface_code_d3", atom_roles=ATOM_ROLES)
+```
+
+Data-qubit atoms are red; ancilla atoms are blue. The example uses 40 SLM
+traps arranged in horizontal pairs and an arbitrary initial placement.
+All 24 CZ gates fit into four Rydberg layers under the placement model.
+
+## Implementation
 
 | File | Purpose |
 | --- | --- |
-| [`solver/compiler.py`](solver/compiler.py) | Candidate selection, horizon search, and schedule construction |
-| [`solver/constraints.py`](solver/constraints.py) | Transport and gate-distance constraints |
-| [`solver/visualization.py`](solver/visualization.py) | Atom paths, AOD lines, and gate-execution highlights |
-| [`solver/smt_introduction.py`](solver/smt_introduction.py) | Introductory Latin-square, graph-coloring, and maze examples |
-
-## Demonstration
-
-[![Gate-layer scheduling](solver/media/mixed_gate_layers.png)](solver/media/mixed_gate_layers.mp4)
-
-Green outlines indicate SLM sites; dashed red lines indicate active AOD lines.
-Blue cells highlight atoms addressed by local rotations; a green field indicates
-a global rotation; an orange field indicates a global Rydberg pulse.
-Execution frames are separate from transport steps, so consecutive global
-rotations remain visible without adding transport duration.
-
-Compilation examples are collected in [`solver/media/`](solver/media/).
-The [single-qubit example](solver/media/single_qubit_layers.mp4) and its
-[preview](solver/media/single_qubit_layers.png) accompany the version in
-[`1q_layer`](https://github.com/Vladlen24/neutral-atom-qec/tree/1q_layer).
-
-## Tests
+| [solver/placement.py](solver/placement.py) | SLM placement constraints, layer scheduling, and snapshot export |
+| [solver/test_placement.py](solver/test_placement.py) | Placement, ordering, cardinality, and failure checks |
+| [solver/compiler.py](solver/compiler.py) | Earlier compiler with transport; shared operation indexing and candidate selection |
+| [solver/README.md](solver/README.md) | Earlier transport model, retained for comparison |
 
 ```sh
-python3 -m unittest discover -s solver -p "test_*.py"
+python3 -m unittest discover -s solver -p 'test_*.py'
 ```
 
 ## Repository branches
 
 | Branch | Scope |
 | --- | --- |
-| `main` | SMT compiler and its mathematical model |
-| [`1q_layer`](https://github.com/Vladlen24/neutral-atom-qec/tree/1q_layer) | Single-qubit scheduling |
-| [`manual_compilation`](https://github.com/Vladlen24/neutral-atom-qec/tree/manual_compilation) | Hand-scheduled distance-3 surface-code logical state preparation |
-| [`external_compilers`](https://github.com/Vladlen24/neutral-atom-qec/tree/external_compilers) | Experiments with MQT QMAP, HyRoNA, and OLSQ-DPQA |
+| `placement-routing` | SLM placement with routing deferred |
+| [main](https://github.com/Vladlen24/neutral-atom-qec/tree/main) | Compiler with joint transport and gate-layer search |
+| [1q_layer](https://github.com/Vladlen24/neutral-atom-qec/tree/1q_layer) | Single-qubit scheduling |
+| [manual_compilation](https://github.com/Vladlen24/neutral-atom-qec/tree/manual_compilation) | Hand-scheduled distance-3 surface-code logical state preparation |
+| [external_compilers](https://github.com/Vladlen24/neutral-atom-qec/tree/external_compilers) | Experiments with external compilers |

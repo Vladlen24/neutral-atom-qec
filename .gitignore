@@ -26,3 +26,6 @@ __pycache__/
 
 # Notebook-generated videos
 /solver/mapf_*.mp4
+
+# Local placement design notes
+/solver/PLACEMENT_README.ru.md
