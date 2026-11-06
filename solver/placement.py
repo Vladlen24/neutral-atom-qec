@@ -24,8 +24,10 @@ from z3 import (
 
 if __package__:
     from .compiler import get_layer_candidates, index_gate_operations
+    from .routing import route_transition, validate_route, transport_actions
 else:
     from compiler import get_layer_candidates, index_gate_operations
+    from routing import route_transition, validate_route, transport_actions
 
 
 # Architecture and input gates
@@ -154,8 +156,8 @@ def validate_architecture(config):
             raise ValueError(f"{key} must be finite and nonnegative.")
 
 
-def compile_placement(gate_seq, *, architecture=None, timeout_ms=0):
-    """Maximize gates per layer; routing and movement costs are not evaluated.
+def compile_placement(gate_seq, *, architecture=None, timeout_ms=0, routing=False):
+    """Maximize gates per layer; optionally require sequential corridor routing.
 
     timeout_ms bounds each solver check (zero means unlimited). UNKNOWN
     stops compilation rather than being interpreted as a smaller feasible K.
@@ -170,8 +172,11 @@ def compile_placement(gate_seq, *, architecture=None, timeout_ms=0):
     started = time.perf_counter()
     while remaining:
         layer_type, candidates = get_layer_candidates(remaining)
+        route = None
         if layer_type == "global":
             selected, positions = candidates, list(current)
+            if routing:
+                route = route_transition(current, positions, config)
         else:
             x = [Int(f"x_{i}") for i in range(len(current))]
             y = [Int(f"y_{i}") for i in range(len(current))]
@@ -210,17 +215,28 @@ def compile_placement(gate_seq, *, architecture=None, timeout_ms=0):
                         (model.eval(xi).as_long(), model.eval(yi).as_long())
                         for xi, yi in zip(x, y)
                     ]
+                    if routing:
+                        route = route_transition(current, positions, config)
+                        checks[-1]["routing"] = {
+                            "success": route["success"],
+                            "reason": route["reason"],
+                        }
+                        if not route["success"]:
+                            # Reject the whole trial and try K-1 from unchanged positions.
+                            continue
+                        validate_route(current, positions, route, config)
                     break
             else:
                 raise ValueError(
-                    f"No feasible {layer_type} placement, even for K=1; ready operations: {[op['id'] for op in candidates]}."
+                    f"No feasible {layer_type} placement{' and route' if routing else ''}, even for K=1; ready operations: {[op['id'] for op in candidates]}."
                 )
         layers.append(
             {
                 "type": layer_type,
                 "operations": selected,
                 "positions": positions,
-                "routing_verified": False,
+                "routing_verified": routing,
+                "route": route,
             }
         )
         selected_ids = {op["id"] for op in selected}
@@ -230,18 +246,59 @@ def compile_placement(gate_seq, *, architecture=None, timeout_ms=0):
         "model": "slm_placement",
         "architecture": config,
         "layers": layers,
-        "routing_verified": False,
+        "routing_verified": routing,
         "checks": checks,
         "seconds": time.perf_counter() - started,
     }
 
 
-# Discrete placement snapshots: no trajectory interpolation
+# Placement snapshots and sequential AOD transport frames
 # ========================================================================
+def routing_frames(schedule):
+    """Build transport frames only for committed, successfully routed layers."""
+    current = list(map(tuple, schedule["architecture"]["starts"]))
+    frames = [{"type": "initial", "operations": [], "positions": list(current)}]
+    for index, layer in enumerate(schedule["layers"], 1):
+        route = layer.get("route")
+        parked = {}
+        if route is not None:
+            validate_route(current, layer["positions"], route, schedule["architecture"])
+            for action in transport_actions(route):
+                atom = action["atom"]
+                point = tuple(action["position"])
+                current[atom] = point
+                if action["action"] == "pickup":
+                    parked.pop(atom, None)
+                if action["action"] == "release" and action["kind"] == "park":
+                    parked[atom] = point
+                frames.append(
+                    {
+                        "type": "transport",
+                        "operations": [],
+                        "positions": list(current),
+                        "moving_atom": atom,
+                        "aod": point if action["action"] != "release" else None,
+                        "parking": list(parked.values()),
+                        "label": f"Before layer {index}: atom {atom} | {action['kind']} | {action['action']}",
+                    }
+                )
+        current = list(map(tuple, layer["positions"]))
+        frames.extend(
+            [
+                {
+                    **layer,
+                    "label": f"Layer {index}: {layer['type']} | gates {[op['id'] for op in layer['operations']]}",
+                }
+            ]
+            * 6
+        )
+    return frames
+
+
 def render_placement_snapshots(
     schedule, output_dir="solver/output/placement", *, atom_roles=None
 ):
-    """Save a contact sheet and a video of held snapshots, without motion paths."""
+    """Save gate-only PNG snapshots and an MP4 including verified AOD routes."""
     import matplotlib.pyplot as plt
     from matplotlib.animation import FuncAnimation, FFMpegWriter
     from matplotlib.lines import Line2D
@@ -276,9 +333,9 @@ def render_placement_snapshots(
         {"type": "initial", "operations": [], "positions": config["starts"]}
     ] + schedule["layers"]
 
-    def draw(ax, index):
+    def draw(ax, index, sequence=frames):
         ax.clear()
-        frame = frames[index]
+        frame = sequence[index]
         kind = frame["type"]
         if kind in ("global", "rydberg"):
             ax.add_patch(
@@ -299,6 +356,21 @@ def render_placement_snapshots(
                     fill=False,
                     edgecolor="seagreen",
                     linewidth=1.2,
+                )
+            )
+        if frame.get("aod") is not None:
+            column, row = frame["aod"]
+            ax.axhline(row, color="red", linestyle="--", linewidth=1.2)
+            ax.axvline(column, color="red", linestyle="--", linewidth=1.2)
+        for x, y in frame.get("parking", []):
+            ax.add_patch(
+                Rectangle(
+                    (x - 0.45, y - 0.45),
+                    0.9,
+                    0.9,
+                    fill=False,
+                    edgecolor="purple",
+                    linewidth=3,
                 )
             )
         if kind == "local":
@@ -344,9 +416,14 @@ def render_placement_snapshots(
         ids = [op["id"] for op in frame["operations"]]
         ax.set_title(
             (
-                "Initial placement"
-                if index == 0
-                else f"Layer {index}: {kind} | gates {ids}"
+                frame.get(
+                    "label",
+                    (
+                        "Initial placement"
+                        if index == 0
+                        else f"Layer {index}: {kind} | gates {ids}"
+                    ),
+                )
             ),
             fontsize=9,
         )
@@ -366,9 +443,7 @@ def render_placement_snapshots(
     )
     for index, ax in enumerate(axes.flat):
         draw(ax, index) if index < len(frames) else ax.set_visible(False)
-    sheet.suptitle(
-        "SLM placements — routing not evaluated; orange links denote CZ gates"
-    )
+    sheet.suptitle("Gate placements — orange links denote CZ gates")
     if legend:
         sheet.legend(handles=legend, loc="lower center", ncol=len(legend))
     sheet.tight_layout(rect=(0, 0.025 if legend else 0, 1, 0.96))
@@ -377,15 +452,25 @@ def render_placement_snapshots(
     plt.close(sheet)
 
     fig, ax = plt.subplots(figsize=(7, 6))
-    fig.suptitle("Placement snapshots — no trajectories or physical timing")
+    routed = schedule.get("routing_verified", False)
+    video_frames = routing_frames(schedule) if routed else frames
+    fig.suptitle(
+        "AOD transport — red dashed lines; purple parking"
+        if routed
+        else "Placement snapshots — routing not evaluated"
+    )
     if legend:
         fig.legend(handles=legend, loc="lower center", ncol=len(legend))
         fig.subplots_adjust(bottom=0.12)
     animation = FuncAnimation(
-        fig, lambda i: draw(ax, i), frames=len(frames), interval=1000, repeat=False
+        fig,
+        lambda i: draw(ax, i, video_frames),
+        frames=len(video_frames),
+        interval=1000 / (6 if routed else 1),
+        repeat=False,
     )
     video = directory / "placements.mp4"
-    animation.save(video, writer=FFMpegWriter(fps=1), dpi=120)
+    animation.save(video, writer=FFMpegWriter(fps=6 if routed else 1), dpi=120)
     plt.close(fig)
     return {"preview": str(preview), "video": str(video)}
 
@@ -403,8 +488,15 @@ def main():
         "--output-dir", type=Path, default=Path("solver/output/placement")
     )
     parser.add_argument("--timeout-ms", type=int, default=0)
+    parser.add_argument(
+        "--route",
+        action="store_true",
+        help="Require sequential A* routing before each layer.",
+    )
     args = parser.parse_args()
-    schedule = compile_placement(DEFAULT_GATES, timeout_ms=args.timeout_ms)
+    schedule = compile_placement(
+        DEFAULT_GATES, timeout_ms=args.timeout_ms, routing=args.route
+    )
     args.output_dir.mkdir(parents=True, exist_ok=True)
     (args.output_dir / "schedule.json").write_text(
         json.dumps(schedule, indent=2) + "\n"
@@ -414,7 +506,7 @@ def main():
             f"Layer {index}: {layer['type']}, operations {[op['id'] for op in layer['operations']]}"
         )
     print(
-        f"{len(schedule['layers'])} layers, {len(schedule['checks'])} solver checks, {schedule['seconds']:.3f} s; routing not evaluated."
+        f"{len(schedule['layers'])} layers, {len(schedule['checks'])} solver checks, {schedule['seconds']:.3f} s; routing verified: {schedule['routing_verified']}."
     )
     if args.animate:
         print(render_placement_snapshots(schedule, args.output_dir))

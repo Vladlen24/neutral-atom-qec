@@ -8,15 +8,16 @@ not represented in this model.
 The compiler is developed independently using [Z3](https://github.com/Z3Prover/z3).
 It schedules local rotations, global rotations, and CZ gates while preserving
 operation order on each atom. Ready local rotations have priority over ready
-CZ gates. Each layer maximizes the number of parallel gates; there is no
-movement-cost objective yet.
+CZ gates. Each layer prioritizes the number of parallel gates; optional sequential
+A* routing checks whether its placement can be reached. A routing failure
+reduces the layer size K. There is no movement-cost objective yet.
 
 ## Run
 
 ```sh
 python3 -m pip install -r solver/requirements.txt
 python3 solver/placement.py
-python3 solver/placement.py --animate
+python3 solver/placement.py --route --animate
 python3 solver/placement.py --timeout-ms 60000
 ```
 
@@ -46,8 +47,9 @@ Coordinates are integer grid positions; rotation angles are in radians.
 scheduling rules, and planned routing interface.
 
 Each output layer contains its type, operation IDs and gates, and the position
-of every atom. Repeated gates retain separate IDs. `routing_verified` is false:
-a placement solution does not establish that its incoming transport is feasible.
+of every atom. Repeated gates retain separate IDs. With `routing=True`, each accepted
+placement includes a verified sequential route; placement-only results keep
+`routing_verified` false.
 Global rotations retain the preceding placement.
 
 ### Steane placement example
@@ -57,7 +59,10 @@ Global rotations retain the preceding placement.
 The ten-atom example uses twelve CZ gates between data and ancilla atoms,
 arranged into four Rydberg layers between two global rotations.
 
-The video holds one snapshot per layer, without interpolating atom motion.
+The videos include sequential AOD transport. Red dashed lines show the active
+row and column, and purple outlines mark temporary SLM parking. PNG contact
+sheets contain only initial and gate-execution placements, including any
+smaller layers accepted after routing feedback.
 Blue cells indicate local rotations, green shading indicates a global rotation,
 and orange shading indicates a Rydberg pulse. Orange links denote CZ gates,
 not transport paths. Frame duration does not represent physical execution time.
@@ -74,7 +79,7 @@ contains 24 CZ gates, 44 local rotations, and eight global rotations.
 ```python
 from solver.surface_code_d3 import ARCHITECTURE, ATOM_ROLES, build_gate_seq
 
-schedule = compile_placement(build_gate_seq(), architecture=ARCHITECTURE)
+schedule = compile_placement(build_gate_seq(), architecture=ARCHITECTURE, routing=True)
 render_placement_snapshots(schedule, "solver/output/surface_code_d3", atom_roles=ATOM_ROLES)
 ```
 
@@ -89,6 +94,7 @@ All 24 CZ gates fit into four Rydberg layers under the placement model.
 | File | Purpose |
 | --- | --- |
 | [solver/placement.py](solver/placement.py) | SLM placement constraints, layer scheduling, and snapshot export |
+| [solver/routing.py](solver/routing.py) | A* corridor paths, sequential transfers, cycle parking, and replay checks |
 | [solver/test_placement.py](solver/test_placement.py) | Placement, ordering, cardinality, and failure checks |
 | [solver/compiler.py](solver/compiler.py) | Earlier compiler with transport; shared operation indexing and candidate selection |
 | [solver/README.md](solver/README.md) | Earlier transport model, retained for comparison |
@@ -101,7 +107,7 @@ python3 -m unittest discover -s solver -p 'test_*.py'
 
 | Branch | Scope |
 | --- | --- |
-| `placement-routing` | SLM placement with routing deferred |
+| `placement-routing` | SLM placement and sequential A* routing |
 | [main](https://github.com/Vladlen24/neutral-atom-qec/tree/main) | Compiler with joint transport and gate-layer search |
 | [1q_layer](https://github.com/Vladlen24/neutral-atom-qec/tree/1q_layer) | Single-qubit scheduling |
 | [manual_compilation](https://github.com/Vladlen24/neutral-atom-qec/tree/manual_compilation) | Hand-scheduled distance-3 surface-code logical state preparation |

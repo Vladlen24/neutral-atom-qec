@@ -2,8 +2,8 @@
 
 The solver assigns atom positions at gate execution. It does not model the
 transitions between those positions. Every atom, including spectators, is
-held in an SLM trap at every modeled layer. A future router is responsible
-for pickup, transport, and release before the next gate layer.
+held in an SLM trap at every modeled layer. An optional sequential router handles
+pickup, transport, and release before the next gate layer.
 
 ## Variables and common constraints
 
@@ -142,32 +142,61 @@ would declare 396 atom/line variables plus CZ selectors. The placement model
 uses 20 coordinate variables plus CZ selectors. This compares declarations,
 not solver complexity or the runtime of equally complete compilation tasks.
 
-## Routing interface and planned extensions
+## Sequential corridor routing
 
-The schedule contains the initial placement, then a sequence of gate types,
-operation IDs, and all-atom placements. Routing is not implemented;
-`routing_verified` remains false. Snapshot transitions make no assertion
-about reachability, transport duration, or collisions.
+`compile_placement(..., routing=True)` checks each proposed placement with the
+A* router in `routing.py`. Without this option the placement-only behavior
+remains available. No transport variables are added to Z3.
 
-The first planned router moves one atom at a time through corridors. It may
-enter its source and destination SLM traps, but cannot pass over another SLM
-trap, even an empty one. If a placement transition cannot be routed, the
-initial recovery strategy will split that gate layer into sublayers and
-recompute their placements and routes. Splitting alone does not guarantee
-feasibility; even a single-gate layer may remain unreachable.
+Each transfer uses one active AOD row and one column. The atom follows their
+intersection; only one axis moves per unit grid step. Pickup and release are
+stationary actions, and the AOD is deactivated between transfers. All other
+atoms remain in SLM traps. Transport occurs with gate pulses off.
 
-A later pipeline will invoke routing immediately after each placement. Gates
-that cannot yet execute will remain pending with their original IDs and
-input-order dependencies. Dependent gates and global rotations must wait;
-failed operations must not simply be appended to the end of the program.
+A* allows the source and destination SLM sites but blocks every other SLM
+site, including empty ones. Its heuristic is Manhattan distance and every
+edge costs one cell. This finds shortest individual transfers, not an optimal
+whole routing schedule. Velocities, beam widths, finite atom sizes, and physical
+timings are not modeled.
 
-Future parallel transport may require intermediate SLM parking, release,
-AOD reconfiguration, and recapture. Such stops are distinct from passing over
-a trap during one uninterrupted transport leg. They are deferred, not
-permanently prohibited by this placement model.
+Deliver atoms with empty destinations first, using atom index to break ties.
+When the remaining destinations form occupied cycles, park one atom in an
+empty SLM outside the complete target set. Choose the shortest reachable
+parking path, breaking ties by site coordinates; the parking site must also
+have a corridor path to that atom's final destination. Resolve the opened
+cycle before another cycle needs the buffer. Parking can therefore be reused.
 
-Potential secondary objectives, after maximizing K, include the number of
-atoms moved and a sum of estimated travel distances. A precomputed corridor
-distance table can supply the latter without introducing time-indexed
-variables. Individual distances do not certify joint routing feasibility.
-These objectives, routing, and sublayer recovery are not implemented here.
+The router returns a complete plan or a failure reason (`disconnected_goal`,
+`no_parking_site`, or `no_parking_path`). A failed trial has no physical effect:
+its intermediate positions and moves are discarded. At the same layer, the
+placer decreases K by one, rebuilds the placement problem, and tries routing
+again from the unchanged current placement. It does not try another SMT model
+at the rejected K. Failure at K=1 stops with an error; it does not certify that
+all possible placements or routes are impossible. UNKNOWN still stops directly.
+
+Only successfully routed layers remove operations from the pending list.
+Every unexecuted occurrence keeps its original ID and order dependencies.
+This can split a proposed layer into smaller layers; all accepted layers are
+included in both the output schedule and the PNG contact sheet.
+
+Successful routes are replayed to verify endpoints, unique occupancy, grid
+bounds, unit axial motion, and the absence of intermediate SLM crossings.
+`routing_verified` means verified under this discrete one-atom model.
+The output retains transfer paths and parking labels. `transport_actions`
+translates these paths into pickup, move-row, move-column, and release actions.
+
+The MP4 shows the active row and column as red dashed lines, stationary pickup
+and release, and temporary parking as a purple outline. Atom colors retain
+their data/ancilla meaning. PNG images show only initial and gate-execution
+placements. Frame duration is illustrative, not physical gate or transport time.
+
+## Future transport extensions
+
+Parallel routing will need shared row/column motion, line separation and order,
+capacity limits, and checks of every active intersection, including empty
+ones. Intermediate SLM parking and recapture may be needed. Before choosing
+between pathfinding and SMT for parallel routing, benchmark the fixed-endpoint
+axial transport problem and its variable/constraint counts.
+
+Potential secondary placement objectives, after maximizing K, include the
+number of atoms moved and estimated corridor distance. These remain deferred.

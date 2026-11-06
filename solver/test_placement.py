@@ -22,7 +22,7 @@ def line_architecture(sites, starts=None, **radii):
 
 
 class PlacementTests(unittest.TestCase):
-    def assert_valid_schedule(self, gates, result):
+    def assert_valid_schedule(self, gates, result, routed=False):
         config = result["architecture"]
         previous = config["starts"]
         sites = set(map(tuple, config["slm_sites"]))
@@ -70,7 +70,7 @@ class PlacementTests(unittest.TestCase):
             previous = positions
         self.assertEqual(sorted(seen), list(range(len(gates))))
         self.assertEqual(actual_order, expected_order)
-        self.assertFalse(result["routing_verified"])
+        self.assertEqual(result["routing_verified"], routed)
 
     def test_ten_atom_example(self):
         result = compile_placement(DEFAULT_GATES, timeout_ms=10000)
